@@ -145,7 +145,15 @@ users_df["last_login"] = pd.to_datetime(
     utc=True
 )
 
-users = users_df[["user_id", "user_name", "last_login"]].copy()
+users = users_df[["user_id", "user_name", "last_login", "email"]].copy()
+
+
+params = {'data_type': 'pageradm_employee_ghr',
+'MLR': 'L'}
+custom_columns = ['cost_center_name', 'dept_name', 'smtp', 'title']
+custom_operators = {'smtp': 'notnull'}
+user_data = getData(params=params, custom_columns=custom_columns, custom_operators=custom_operators)
+
 
 
 # 2b. ActionLog – we pull all categories, then filter in-code
@@ -233,9 +241,12 @@ users["Percent of Analyst Functions"] = analyst_percent(
     users["analyst_cnt"], users["non_analyst_cnt"]
 )
 
+users = users.merge(user_data, left_on="email", right_on="smtp", how="left")
+
 # 3️⃣ Rename columns to match the SQL output (optional but handy)
 final_df = users.rename(columns={
     "user_name": "USER_NAME",
+    "email":     "USER_EMAIL",
     "group_name": "GROUP_NAME",
     "analyst_cnt": "Analyst functions",
     "non_analyst_cnt": "Non‑Analyst functions"
@@ -245,7 +256,10 @@ final_df = users.rename(columns={
     "LAST_ACTIVITY",
     "Analyst functions",
     "Non‑Analyst functions",
-    "Percent of Analyst Functions"
+    "Percent of Analyst Functions",
+    "cost_center_name",
+    "dept_name",
+    "title"
 ]]
 
 
