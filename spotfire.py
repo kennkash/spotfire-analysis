@@ -62,20 +62,20 @@ def analyst_percent(analyst: pd.Series, non_analyst: pd.Series) -> pd.Series:
 # ------------------------------------------------------------------
 # Users we never want to report on
 USERNAME_EXCLUDES = [
-    "bjeon4",
-    "schang",
-    "jsmith",
-    "ychoi8027",
-    "dgentry9748",
-    "cellingsworth3979",
-    "silkroad.park",
-    "jtaylor",
-    "bregan",
-    "joberbeck",
-    "ehameister",
-    "ekerr",
-    "rlee2",
-    "jlevy",
+    "user1",
+    "user2",
+    "user3",
+    "user4",
+    "user5",
+    "user6",
+    "user7",
+    "user8",
+    "user9",
+    "user10",
+    "user11",
+    "user12",
+    "user13",
+    "user14",
 ]
 
 # Categories that *do* belong to an “analyst” workflow
@@ -148,7 +148,7 @@ users_df["last_login"] = pd.to_datetime(
 users = users_df[["user_id", "user_name", "last_login", "email"]].copy()
 
 
-params = {'data_type': 'pageradm_employee_ghr',
+params = {'data_type': 'employee_ghr',
 'MLR': 'L'}
 custom_columns = ['cost_center_name', 'dept_name', 'smtp', 'title']
 custom_operators = {'smtp': 'notnull'}
