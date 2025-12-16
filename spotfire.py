@@ -41,6 +41,12 @@ def categorize_title(title_val: str) -> str:
         return "Other"
 
     t = title_val.lower()
+    
+    # Leadership-ish roles
+    leadership_keywords = [
+        "manager", "vp", "director", "supervisor",
+        "tr"
+    ]
 
     # Engineer-ish roles
     engineer_keywords = [
@@ -53,6 +59,9 @@ def categorize_title(title_val: str) -> str:
         "technician", "tech", "operator", "specialist",
         "associate", "analyst", "maintenance"
     ]
+    
+    if any(k in t for k in leadership_keywords):
+        return "Leadership"
 
     if any(k in t for k in engineer_keywords):
         return "Engineer"
@@ -66,32 +75,60 @@ def categorize_title(title_val: str) -> str:
 # 1. SETTINGS
 # ------------------------------------------------------------
 USERNAME_EXCLUDES = [
-    "user1", "user2", "user3",
-    "user4", "user5", "user6",
-    "user7", "user8", "user9",
-    "user10", "user11", "user12",
-    "user13", "user14",
+"bjeon4",
+"schang",
+"jsmith",
+"ychoi8027",
+"dgentry9748",
+"cellingsworth3979",
+"silkroad.park",
+"jtaylor",
+"bregan",
+"joberbeck",
+"ehameister",
+"ekerr",
+"rlee2",
+"jlevy",
+"spotfire_automation",
+"admin",
+"admin.license"
 ]
-
 ANALYST_CATEGORIES = {
     "analysis_pro",
-    "data_connection_pro",
+    "data_connector_pro",
     "info_link",
-    "datafunction_pro",
-    "datasource_pro",
-    "file_pro",
-    "find_pro",
-    "library_pro",
+    # "datafunction_pro", # no other actions besides execute
+    # "datasource_pro",
+    # "file_pro",
+    # "find_pro",
+    # "library_pro",
 }
 
 EXCLUDE_CATEGORIES = [
-    "admin", "analysis_as", "auth", "auth_as", "auth_pro", "auth_wp",
-    "automation_job_as", "automation_task_as", "codetrust", "dblogging",
-    "ems", "library", "library_as", "monitoring", "monitoring_wp",
-    "routing_rules", "scheduled_updates",
+    #Generic Categories
+    "admin", 
+    "analysis_as", 
+    "auth", "auth_as", "auth_pro", "auth_wp",
+    "automation_job_as", "automation_task_as", 
+    "codetrust", 
+    "dblogging",
+    "ems", 
+    "library", "library_as", "library_wp", "library_pro" 
+    "monitoring", "monitoring_wp","monitoring_as"
+    "routing_rules", 
+    "scheduled_updates", 
+    
+    #Categories within license structure
+    "file_pro", "file_wp", 
+    "find_pro", "find_wp", 
+    "data_connector_as"
+    "datasource_pro", "datasource_wp", "datasource_as",  # no other actions besides execute
+    "datafunction_pro", "datafunction_wp", 'datafunction_as'  # no other actions besides execute
 ]
 
-
+EXCLUDE_ACTIONS = [
+    "apply_bookmark", "create_comment", "export", "modify_filter", "reset_all_visible_filters", "reset_filter", "set_page", "load_connection", "load_source"
+]
 # ------------------------------------------------------------
 # 2. LOAD USERS WITH LAST LOGIN (90 DAYS)
 # ------------------------------------------------------------
@@ -126,13 +163,16 @@ df_actions = getData(
     params={
         "data_type": "spotfire_if2sf_actionlog",
         "MLR": "T",
+        'success': '1', # action was executed successfully
         "log_category": EXCLUDE_CATEGORIES,
+        "log_action": EXCLUDE_ACTIONS,
         "logged_time": cutoff_str,
-        "user_name": "SPOTFIRESYSTEM\\automationservices",
+        "user_name": ["SPOTFIRESYSTEM\\automationservices", "SPOTFIRESYSTEM\monitoring", "SPOTFIRESYSTEM\scheduledupdates", "SPOTFIREOAUTH2\a72082b286310fe3c8d48129c26b295f.oauth-clients.spotfire.tibco.com"],
     },
     custom_columns=["log_action", "log_category", "user_name"],
     custom_operators={
         "log_category": "!",
+        "log_action": "!",
         "logged_time": ">=",
         "user_name": "!",
     },
@@ -140,6 +180,16 @@ df_actions = getData(
 
 # Flag each row as analyst / non-analyst
 df_actions["is_analyst"] = df_actions["log_category"].isin(ANALYST_CATEGORIES)
+
+# Override: Certain info_link actions should *not* count as analyst actions
+mask_info_link_exceptions = (
+(df_actions["log_category"] == "info_link") &
+(df_actions["log_action"].isin(["get_data", "load_il"]))) 
+# | (df_actions["log_category"] == "datafunction_pro") &
+# (df_actions["log_action"] == 'execute'))
+
+
+df_actions.loc[mask_info_link_exceptions, "is_analyst"] = False
 
 # Aggregate to per-user counts
 action_counts = (
@@ -158,17 +208,69 @@ users = (
 
 
 # ------------------------------------------------------------
-# 4. MERGE HR DATA (COST CENTER, DEPT, TITLE)
+# 4. MERGE HR DATA (EMAIL FIRST, THEN NT_ID FALLBACK, DROPPING NON-MATCHES)
 # ------------------------------------------------------------
-params_hr = {"data_type": "employee_ghr", "MLR": "L"}
+params_hr = {"data_type": "pageradm_employee_ghr", "MLR": "L"}
 user_data = getData(
-    params=params_hr,
-    custom_columns=["cost_center_name", "dept_name", "smtp", "title"],
-    custom_operators={"smtp": "notnull"},
+params=params_hr,
+custom_columns=["cost_center_name", "dept_name", "smtp", "title", "nt_id"],
+custom_operators={"smtp": "notnull"},
 )
 
-users = users.merge(user_data, left_on="email", right_on="smtp", how="left")
+# Make nt_id safe and unique
+user_data["nt_id"] = user_data["nt_id"].astype(str).str.strip().str.lower()
+user_data = (
+user_data.sort_values("nt_id")
+.drop_duplicates(subset=["nt_id"], keep="last")
+)
 
+# Normalize Spotfire usernames for comparing to nt_id
+users["user_name_norm"] = users["user_name"].astype(str).str.lower().str.strip()
+
+# ---- 4a. Merge on email (smtp)
+merge_email = users.merge(
+user_data,
+left_on="email",
+right_on="smtp",
+how="left",
+indicator=True
+)
+
+matched_email = merge_email[merge_email["_merge"] == "both"].copy()
+unmatched_email = merge_email[merge_email["_merge"] == "left_only"].copy()
+
+# Clean up unmatched (remove partially merged HR columns)
+cols_to_remove = ["cost_center_name", "dept_name", "title", "smtp", "nt_id", "_merge"]
+unmatched_email.drop(columns=[c for c in cols_to_remove if c in unmatched_email.columns],
+inplace=True)
+
+# ---- 4b. Merge remaining rows on nt_id
+merge_ntid = unmatched_email.merge(
+user_data,
+left_on="user_name_norm",
+right_on="nt_id",
+how="left",
+indicator=True
+)
+
+matched_ntid = merge_ntid[merge_ntid["_merge"] == "both"].copy()
+unmatched_final = merge_ntid[merge_ntid["_merge"] == "left_only"].copy()
+
+# ---- 4c. Keep ONLY rows that matched on email OR nt_id
+combined = pd.concat([matched_email.drop(columns=["_merge"]),
+matched_ntid.drop(columns=["_merge"])],
+ignore_index=True)
+
+# ---- 4d. Drop users that fail BOTH merges
+users = combined.copy()
+
+# ---- 4e. Optional cleanup
+users.drop(columns=["user_name_norm"], inplace=True)
+
+
+print("Matched on email:", len(matched_email))
+print("Matched on nt_id:", len(matched_ntid))
+print("Dropped (no HR match):", len(unmatched_final))
 
 # ------------------------------------------------------------
 # 5. FINAL USER-LEVEL DATAFRAME
@@ -241,9 +343,138 @@ top_actions_df = top_actions_df.rename(
     }
 )
 
+# ------------------------------------------------------------
+# 7. MOST VIEWED REPORTS
+# ------------------------------------------------------------
+params = {'data_type': 'spotfire_if2sf_actionlog',
+            'MLR': 'T',
+            'log_category': 'library%',
+            'log_action': ['load_content', 'load'],
+            'user_name': ["SPOTFIRESYSTEM\\automationservices", "SPOTFIRESYSTEM\monitoring", "SPOTFIRESYSTEM\scheduledupdates", "SPOTFIREOAUTH2\a72082b286310fe3c8d48129c26b295f.oauth-clients.spotfire.tibco.com"],
+            'logged_time': cutoff_str}
+custom_columns = ['id2', 'log_action', 'log_category', 'logged_time']
+custom_operators = {'log_category': 'like', 'user_name': '!', "logged_time": ">=",}
+df_reports = getData(params=params, custom_columns=custom_columns, custom_operators=custom_operators)
+
+
+df_report = (
+    df_reports
+    .groupby('id2', as_index=False)                     # keep the column
+    .agg(total_loads=('id2', 'size'))                   # count per id2
+    .sort_values('total_loads', ascending=False)       # ORDER BY total_loads DESC
+    .rename(columns={'id2': 'report_path'})             # alias like SELECT
+    .reset_index(drop=True)                             # tidy index
+)
+
 
 # ------------------------------------------------------------
-# 7. EXPORT BOTH CSVs TO S3
+# 8. PLATFORM USAGE: WEB PLAYER vs CLOUD vs LOCAL DESKTOP
+# ------------------------------------------------------------
+
+# Active usernames (last 90 days)
+ACTIVE_USERNAMES = set(users["user_name"].unique())
+
+CLOUD_IPS = {"192.30.106.119", "192.30.106.141", "192.30.106.142"}
+LOCAL_IPS = {"105.195.16.243"}
+
+# 8a. Web Player logins (auth_wp, success = 1)
+df_wp_logins = getData(
+    params={
+        "data_type": "spotfire_if2sf_actionlog",
+        "MLR": "T",
+        "log_category": "auth_wp",
+        "log_action": "login",
+        "logged_time": cutoff_str,
+        "success": "1",
+        "user_name": ["SPOTFIRESYSTEM\\automationservices", "SPOTFIRESYSTEM\monitoring", "SPOTFIRESYSTEM\scheduledupdates", "SPOTFIREOAUTH2\a72082b286310fe3c8d48129c26b295f.oauth-clients.spotfire.tibco.com"],
+    },
+    custom_columns=["user_name", "machine", "success"],
+    custom_operators={
+        "logged_time": ">=",
+        "user_name": "!",   # exclude the automation user
+    },
+)
+
+# Keep only active users
+df_wp_logins = df_wp_logins[df_wp_logins["user_name"].isin(ACTIVE_USERNAMES)].copy()
+df_wp_logins["platform"] = "Web Player"
+
+
+# 8b. Desktop/Cloud logins (auth_pro, success = 1)
+df_pro_logins = getData(
+    params={
+        "data_type": "spotfire_if2sf_actionlog",
+        "MLR": "T",
+        "log_category": "auth_pro",
+        "log_action": "login",
+        "logged_time": cutoff_str,
+        "success": "1",
+        "user_name": ["SPOTFIRESYSTEM\\automationservices", "SPOTFIRESYSTEM\monitoring", "SPOTFIRESYSTEM\scheduledupdates", "SPOTFIREOAUTH2\a72082b286310fe3c8d48129c26b295f.oauth-clients.spotfire.tibco.com"],
+    },
+    custom_columns=["user_name", "machine", "success"],
+    custom_operators={
+        "logged_time": ">=",
+        "user_name": "!",   # exclude automation user
+    },
+)
+
+df_pro_logins = df_pro_logins[df_pro_logins["user_name"].isin(ACTIVE_USERNAMES)].copy()
+
+# Classify auth_pro logins based on machine IP
+def classify_pro_platform(ip: str) -> str:
+    if ip in CLOUD_IPS:
+        return "Cloud"
+    if ip in LOCAL_IPS:
+        return "Local Desktop"
+    return "Other"
+
+df_pro_logins["platform"] = df_pro_logins["machine"].astype(str).apply(classify_pro_platform)
+
+# 8c. Combine all login records
+df_logins_all = pd.concat([df_wp_logins, df_pro_logins], ignore_index=True)
+
+# 8d. Count login events per user & platform
+user_platform_logins = (
+    df_logins_all
+    .groupby(["user_name", "platform"])
+    .size()
+    .reset_index(name="LOGIN_COUNT")
+)
+
+# Optional: restrict to platforms you care about
+# user_platform_logins = user_platform_logins[user_platform_logins["platform"].isin(
+#     ["Web Player", "Cloud", "Local Desktop"]
+# )]
+
+# 8e. Join email / HR info if you want it in this CSV
+user_platform_logins = user_platform_logins.merge(
+    users[
+        [
+            "user_name",
+            "email",
+            "cost_center_name",
+            "dept_name",
+            "title",
+            "TITLE_CATEGORY",
+        ]
+    ],
+    on="user_name",
+    how="left",
+)
+
+platform_usage_df = user_platform_logins.rename(
+    columns={
+        "user_name": "USER_NAME",
+        "email": "USER_EMAIL",
+    }
+)
+
+# Now you have columns:
+#   USER_NAME, USER_EMAIL, platform, LOGIN_COUNT, cost_center_name, dept_name, title, TITLE_CATEGORY
+
+
+# ------------------------------------------------------------
+# 8. EXPORT ALL CSVs TO S3
 # ------------------------------------------------------------
 bucket = "spotfire-admin"
 
@@ -265,6 +496,26 @@ if s3.chk_file_exist(bucket, filename_actions):
 
 s3.upload_df_as_csv(bucket=bucket, dataframe=top_actions_df, s3_path=s3_path_actions)
 
+# Top report views CSV
+filename_reports = "top-viewed-reports.csv"
+s3_path_reports = f"s3://{bucket}/{filename_reports}"
+
+if s3.chk_file_exist(bucket, filename_reports):
+    s3.delete_file(bucket=bucket, key=filename_reports)
+
+s3.upload_df_as_csv(bucket=bucket, dataframe=df_report, s3_path=s3_path_reports)
+
+# Platform usage CSV
+filename_platform = "spotfire-platform-logins.csv"
+s3_path_platform = f"s3://{bucket}/{filename_platform}"
+
+if s3.chk_file_exist(bucket, filename_platform):
+    s3.delete_file(bucket=bucket, key=filename_platform)
+
+s3.upload_df_as_csv(bucket=bucket, dataframe=platform_usage_df, s3_path=s3_path_platform)
+
 print("User-level rows:", len(final_df))
 print("Top actions rows:", len(top_actions_df))
+print("Top report rows:", len(df_report))
+print("Platform usage rows:", len(platform_usage_df))
 print("Export complete.")
