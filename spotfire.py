@@ -75,23 +75,16 @@ def categorize_title(title_val: str) -> str:
 # 1. SETTINGS
 # ------------------------------------------------------------
 USERNAME_EXCLUDES = [
-"bjeon4",
-"schang",
-"jsmith",
-"ychoi8027",
-"dgentry9748",
-"cellingsworth3979",
-"silkroad.park",
-"jtaylor",
-"bregan",
-"joberbeck",
-"ehameister",
-"ekerr",
-"rlee2",
-"jlevy",
-"spotfire_automation",
-"admin",
-"admin.license"
+"user1",
+"user2",
+"user3",
+"user4",
+"user5",
+"user6",
+"user7",
+"user8",
+"user9",
+"user10",
 ]
 ANALYST_CATEGORIES = {
     "analysis_pro",
