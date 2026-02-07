@@ -1,28 +1,4 @@
-0 verbose cli /mnt/k.kashmiry/.nvm/versions/node/v22.14.0/bin/node /mnt/k.kashmiry/.nvm/versions/node/v22.14.0/lib/node_modules/npm/bin/npm-cli.js
-1 info using npm@11.7.0
-2 info using node@v22.14.0
-3 silly config load:file:/mnt/k.kashmiry/.nvm/versions/node/v22.14.0/lib/node_modules/npm/npmrc
-4 silly config load:file:/mnt/k.kashmiry/git/k.kashmiry/analyses/spotfire/spotfire-license-hub/.npmrc
-5 silly config load:file:/mnt/k.kashmiry/.npmrc
-6 silly config load:file:/mnt/k.kashmiry/.nvm/versions/node/v22.14.0/etc/npmrc
-7 verbose title npm exec tailwindcss init -p
-8 verbose argv "exec" "--" "tailwindcss" "init" "-p"
-9 verbose logfile logs-max:10 dir:/mnt/k.kashmiry/npm-cache/_logs/2026-02-07T16_56_02_799Z-
-10 verbose logfile /mnt/k.kashmiry/npm-cache/_logs/2026-02-07T16_56_02_799Z-debug-0.log
-11 silly logfile start cleaning logs, removing 1 files
-12 silly logfile done cleaning log files
-13 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
-14 verbose stack Error: could not determine executable to run
-14 verbose stack     at getBinFromManifest (/mnt/k.kashmiry/.nvm/versions/node/v22.14.0/lib/node_modules/npm/node_modules/libnpmexec/lib/get-bin-from-manifest.js:17:23)
-14 verbose stack     at exec (/mnt/k.kashmiry/.nvm/versions/node/v22.14.0/lib/node_modules/npm/node_modules/libnpmexec/lib/index.js:206:15)
-14 verbose stack     at async Npm.exec (/mnt/k.kashmiry/.nvm/versions/node/v22.14.0/lib/node_modules/npm/lib/npm.js:208:9)
-14 verbose stack     at async module.exports (/mnt/k.kashmiry/.nvm/versions/node/v22.14.0/lib/node_modules/npm/lib/cli/entry.js:67:5)
-15 verbose pkgid tailwindcss@4.1.18
-16 error could not determine executable to run
-17 verbose cwd /mnt/k.kashmiry/git/k.kashmiry/analyses/spotfire/spotfire-license-hub
-18 verbose os Linux 5.14.0-229.el9.x86_64
-19 verbose node v22.14.0
-20 verbose npm  v11.7.0
-21 verbose exit 1
-22 verbose code 1
-23 error A complete log of this run can be found in: /mnt/k.kashmiry/npm-cache/_logs/2026-02-07T16_56_02_799Z-debug-0.log
+Something went wrong. Please check the error below for more details.
+If the problem persists, please open an issue on GitHub.
+
+request to https://ui.shadcn.com/r/config.json failed, reason: getaddrinfo EAI_AGAIN ui.shadcn.com
