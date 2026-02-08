@@ -1,3 +1,16 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+
+Now I understand the issue. The project is using Vite with Tailwind CSS via the `@tailwindcss/vite` plugin. When using this plugin, the `@tailwind` directives should be processed by the Vite plugin, but the CSS file is being processed by PostCSS as well.
+
+The warning "Unknown at rule @tailwind" occurs because PostCSS doesn't understand the `@tailwind` directives by default - they need to be processed by the Tailwind CSS plugin. Since we're using the Vite plugin (`@tailwindcss/vite`), the `@tailwind` directives should be processed by Vite, not by PostCSS.
+
+The solution is to either:
+1. Remove the `@tailwind` directives from the CSS file since they're being processed by Vite, OR
+2. Keep the directives but ensure PostCSS processes them correctly
+
+Looking at the configuration, the Vite plugin is already set up correctly. The issue is that the CSS file is being processed by PostCSS which doesn't understand the `@tailwind` directives.
+
+The best solution is to remove the `@tailwind` directives from the CSS file since Vite's Tailwind plugin will handle the processing automatically when the CSS is imported.
