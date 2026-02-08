@@ -1,3 +1,8 @@
+grep -R "^import " -n src/components/ui \
+  | grep -vE "(from ['\"](\.|@/))" \
+  | head -n 80
+
+
 Something went wrong. Please check the error below for more details.
 If the problem persists, please open an issue on GitHub.
 
