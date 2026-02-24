@@ -1,3 +1,20 @@
+const totalUniqueViewers = rows.length
+
+
+{!!submittedPath && rows.length > 0 && (
+  <div className="mt-4 p-3 bg-background rounded border">
+    <div className="font-medium mb-2">Summary</div>
+
+    <div className="flex items-center justify-between text-sm">
+      <span>Total unique viewers</span>
+      <span className="font-medium">{totalUniqueViewers}</span>
+    </div>
+  </div>
+)}
+
+
+
+
 function formatDateTime(value: any) {
   if (!value) return ""
 
