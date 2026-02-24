@@ -1,4 +1,26 @@
-def enrich_with_employee_data(
+# 1) Primary merge on email -> smtp (NO renaming to FULL_NAME to avoid collisions)
+merged = df.merge(
+    user_data,
+    how="left",
+    left_on=email_col,
+    right_on="smtp",
+    suffixes=("", "_emp"),
+).drop(columns=["smtp"], errors="ignore")
+
+# --- Capture employee values BEFORE we overlay "existing" columns ---
+emp_full = merged["full_name"] if "full_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
+emp_status = merged["status_name"] if "status_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
+
+emp_cc = merged["cost_center_name"] if "cost_center_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
+emp_dept = merged["dept_name"] if "dept_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
+emp_title = merged["title"] if "title" in merged.columns else pd.Series(index=merged.index, dtype="object")
+
+# --- Now build the output columns: prefer existing values, else employee values ---
+merged["FULL_NAME"] = existing["FULL_NAME"].copy().fillna(emp_full)
+merged["STATUS_NAME"] = existing["STATUS_NAME"].copy().fillna(emp_status)
+merged["cost_center_name"] = existing["cost_center_name"].copy().fillna(emp_cc)
+merged["dept_name"] = existing["dept_name"].copy().fillna(emp_dept)
+merged["title"] = existing["title"].copy().fillna(emp_title)def enrich_with_employee_data(
     df_in: pd.DataFrame,
     email_col: str,
     username_col: str,
