@@ -1,6 +1,7 @@
- how can I make the summary and report badge clear out when the input for the report path is cleared?
+Why when I try to filter for "IT Services" using the text input filter box, does it not filter down? I can see rows where department = IT Services
 
-   // spotfire-license-hub/src/components/report-views/report-views-view.tsx
+
+// spotfire-license-hub/src/components/report-views/report-views-view.tsx
 
 "use client"
 
@@ -12,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Info } from "lucide-react"
+import { Info} from "lucide-react"
 
 
 import { getApiBase } from "@/lib/apiBase"
@@ -60,20 +61,33 @@ function normalize(v: any) {
 function formatDateTime(value: any) {
     if (!value) return ""
 
-    const d = new Date(value)
-    if (isNaN(d.getTime())) return value // fallback if not valid
+    // Handle different input types
+    let dateTime;
+    if (typeof value === 'string') {
+        // Parse ISO 8601 string directly
+        dateTime = new Date(value);
+    } else {
+        // Handle other cases (e.g., Unix timestamp, JS Date object)
+        dateTime = new Date(value);
+    }
 
-    const pad = (n: number) => String(n).padStart(2, "0")
+    if (isNaN(dateTime.getTime())) return value; // fallback if not valid
 
-    const month = pad(d.getMonth() + 1)
-    const day = pad(d.getDate())
-    const year = d.getFullYear()
+    const pad = (n: number) => String(n).padStart(2, "0");
 
-    const hours = pad(d.getHours())
-    const minutes = pad(d.getMinutes())
-    const seconds = pad(d.getSeconds())
+    const month = pad(dateTime.getUTCMonth() + 1);
+    const day = pad(dateTime.getUTCDate());
+    const year = dateTime.getUTCFullYear();
 
-    return `${month}-${day}-${year} ${hours}:${minutes}:${seconds}`
+    const hours = dateTime.getUTCHours();
+    const minutes = pad(dateTime.getUTCMinutes());
+    const seconds = pad(dateTime.getUTCSeconds());
+
+    // Convert to 12-hour format
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const displayHours = hours % 12 || 12; // Convert 0 to 12 for 12PM
+
+    return `${month}/${day}/${year} ${pad(displayHours)}:${minutes}:${seconds} ${ampm}`;
 }
 
 export default function ReportViewsView() {
@@ -87,7 +101,7 @@ export default function ReportViewsView() {
         data: rows = [],
         isLoading,
         isFetching,
-        error,
+        error
     } = useQuery({
         queryKey: ["report-views", submittedPath],
         queryFn: () => fetchReportViews(submittedPath),
@@ -245,18 +259,18 @@ export default function ReportViewsView() {
                                 value={reportPath}
                                 onChange={(e) => setReportPath(e.target.value)}
                                 placeholder="Enter report path (e.g. /31_S.LSI/04 Team/Spotfire/Jane Doe/Spotfire_Analysis)"
-                                className="sm:w-[520px]"
+                                className="sm:w-[540px]"
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") onSubmit()
                                 }}
                                 disabled={isLoading || isFetching}
                             />
-                            <Button onClick={onSubmit} disabled={!reportPath.trim() || isLoading || isFetching}>
+                            <Button onClick={onSubmit} disabled={!reportPath.trim() || isLoading || isFetching} className="hover:cursor-pointer">
                                 Fetch
                             </Button>
                         </div>
 
-                        <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
                             <Input
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
@@ -327,52 +341,62 @@ export default function ReportViewsView() {
                             <div className="text-sm text-muted-foreground mt-2">
                                 No views were found for this report path. Please double check the path and try again.
                             </div>
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                setReportPath("");
+                                setSubmittedPath("");
+                                }}
+                                className="mt-4"
+                            >
+                                Try Another Path
+                            </Button>
                         </div>
                     ) : (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    {columnConfig.map((col) => (
-                                        <TableHead key={col.key}>
-                                            <Button
-                                                variant="ghost"
-                                                className="px-0 h-auto font-medium"
-                                                onClick={() => onSort(col.key)}
-                                            >
-                                                {col.label}
-                                                <span className="ml-2 text-muted-foreground">
-                                                    {sortIcon(sortKey === col.key, sortDir)}
-                                                </span>
-                                            </Button>
-                                        </TableHead>
-                                    ))}
-                                </TableRow>
-                            </TableHeader>
-
-                            <TableBody>
-                                {finalRows.length === 0 ? (
+                            <Table>
+                                <TableHeader>
                                     <TableRow>
-                                        <TableCell colSpan={columnConfig.length} className="text-center py-6">
-                                            No matching results
-                                        </TableCell>
+                                        {columnConfig.map((col) => (
+                                            <TableHead key={col.key}>
+                                                <Button
+                                                    variant="ghost"
+                                                    className="px-0 h-auto font-medium"
+                                                    onClick={() => onSort(col.key)}
+                                                >
+                                                    {col.label}
+                                                    <span className="ml-2 text-muted-foreground">
+                                                        {sortIcon(sortKey === col.key, sortDir)}
+                                                    </span>
+                                                </Button>
+                                            </TableHead>
+                                        ))}
                                     </TableRow>
-                                ) : (
-                                    finalRows.map((r, idx) => (
-                                        <TableRow key={idx}>
-                                            {columnConfig.map((col) => (
-                                                <TableCell key={col.key}>
-                                                    {col.key === "logged_time"
-                                                        ? formatDateTime(r?.[col.key])
-                                                        : normalize(r?.[col.key])}
-                                                </TableCell>
-                                            ))}
+                                </TableHeader>
+
+                                <TableBody>
+                                    {finalRows.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={columnConfig.length} className="text-center py-6">
+                                                No matching results
+                                            </TableCell>
                                         </TableRow>
-                                    ))
-                                )}
-                            </TableBody>
-                        </Table>
+                                    ) : (
+                                        finalRows.map((r, idx) => (
+                                            <TableRow key={idx}>
+                                                {columnConfig.map((col) => (
+                                                    <TableCell key={col.key}>
+                                                        {col.key === "logged_time"
+                                                            ? formatDateTime(r?.[col.key])
+                                                            : normalize(r?.[col.key])}
+                                                    </TableCell>
+                                                ))}
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
                     )}
-                </CardContent>
+                        </CardContent>
             </Card>
         </div>
     )
