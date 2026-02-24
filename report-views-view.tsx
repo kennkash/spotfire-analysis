@@ -1,58 +1,6 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Info } from "lucide-react"
+ how can I make the summary and report badge clear out when the input for the report path is cleared?
 
-
-<div className="flex items-center justify-between">
-  <CardTitle>Report Views</CardTitle>
-
-  <Dialog>
-    <DialogTrigger asChild>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8"
-        aria-label="How to find a report path"
-        title="How to find a report path"
-      >
-        <Info className="h-4 w-4" />
-      </Button>
-    </DialogTrigger>
-
-    <DialogContent className="sm:max-w-[520px]">
-      <DialogHeader>
-        <DialogTitle>Locate a report&apos;s path</DialogTitle>
-      </DialogHeader>
-
-      <div className="space-y-3 text-sm text-muted-foreground">
-        <ol className="space-y-2 list-decimal pl-5">
-          <li>Navigate to Spotfire and open the report</li>
-          <li>
-            In the toolbar, select <strong>File &gt; Document Properties</strong>
-          </li>
-          <li>In the Document Properties menu, select the <strong>Library</strong> tab</li>
-          <li>
-            Copy the report path that follows <code>:analysis:</code> in the Library URL
-          </li>
-        </ol>
-
-        <div className="rounded border bg-background p-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Example</div>
-          <code className="text-xs break-all">
-            :analysis:/31_S.LSI/04 Team/Spotfire/Jane Doe/Spotfire_Analysis
-          </code>
-        </div>
-      </div>
-    </DialogContent>
-  </Dialog>
-</div>
-
-
-
-
-How can I put the section "Locate a report's path" in an info icon somewhere instead that show it in a pop-up dialog ? I am not sure where to put it but somewhere that makes sense:
-
-
-// spotfire-license-hub/src/components/report-views/report-views-view.tsx
+   // spotfire-license-hub/src/components/report-views/report-views-view.tsx
 
 "use client"
 
@@ -63,6 +11,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Info } from "lucide-react"
+
 
 import { getApiBase } from "@/lib/apiBase"
 
@@ -223,33 +174,67 @@ export default function ReportViewsView() {
         <div className="w-full px-4">
             <Card className="shadow-md">
                 <CardHeader>
-                    <CardTitle>Report Views</CardTitle>
+                    <div className="flex items-center justify-between">
+                        <CardTitle>Report Views</CardTitle>
+
+                        <Dialog>
+                            <DialogTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    aria-label="How to find a report path"
+                                    title="How to find a report path"
+                                >
+                                    <Info className="h-4 w-4" />
+                                </Button>
+                            </DialogTrigger>
+
+                            <DialogContent className="sm:max-w-[620px]">
+                                <DialogHeader>
+                                    <DialogTitle>Locate a Report&apos;s Path</DialogTitle>
+                                </DialogHeader>
+
+                                <div className="space-y-3 text-sm text-muted-foreground">
+                                    <ol className="space-y-2 list-decimal pl-5">
+                                        <li>Navigate to Spotfire and open the report</li>
+                                        <li>
+                                            In the toolbar, select <strong>File &gt; Document Properties</strong>
+                                        </li>
+                                        <li>In the Document Properties menu, select the <strong>Library</strong> tab</li>
+                                        <li>
+                                            Copy the report path that follows <code>:analysis:</code> in the Library URL
+                                        </li>
+                                    </ol>
+
+                                    <div className="rounded border bg-background p-3">
+                                        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-4"><Badge variant="secondary">
+                                            Example
+                                        </Badge></div>
+                                        <span className="font-bold">Library URL: </span>
+                                        <code className="text-xs break-all">
+                                            tibcospotfire:server:http\://105.195.16.62\:8081/:analysis:/31_S.LSI/04 Team/Spotfire/Jane Doe/Spotfire_Analysis
+                                        </code>
+                                        <br></br>
+                                        <br></br>
+                                        <span className="font-bold">Report Path: </span>
+                                        <code className="text-xs break-all">
+                                            /31_S.LSI/04 Team/Spotfire/Jane Doe/Spotfire_Analysis
+                                        </code>
+                                    </div>
+                                </div>
+                            </DialogContent>
+                        </Dialog>
+                    </div>
                     {/* Description */}
                     <div className="space-y-2 text-sm text-muted-foreground mt-2 mb-4">
-                        <p className="font-medium">Locate a report's path:</p>
-                        <ul className="space-y-1">
-                            <li className="flex items-start">
-                                <span className="mr-1">1.</span>
-                                Navigate to Spotfire and open the report
+                        <p className="font-medium">Data includes:</p>
+                        <ul className="space-y-2 list-disc pl-5">
+                            <li>Displays report views from the past <strong>30 days</strong></li>
+                            <li>
+                                Shows one entry per user (<i>unique</i> viewers only)
                             </li>
-                            <li className="flex items-start">
-                                <span className="mr-1">2.</span>
-                                <span>
-                                    In the toolbar, select <strong> File &gt; Document Properties </strong>
-                                </span>
-                            </li>
-                            <li className="flex items-start">
-                                <span className="mr-1">3.</span>
-                                <span>
-                                    In the Document Properties menu, select the Library tab
-                                </span>
-                            </li>
-                            <li className="flex items-start">
-                                <span className="mr-1">4.</span>
-                                <span>
-                                    Copy the report path that follows <code>:analysis:</code> in the Library URL
-                                </span>
-                            </li>
+                            <li>Extracts each user's most recent view of the report</li>
                         </ul>
                     </div>
 
