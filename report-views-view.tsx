@@ -1,3 +1,66 @@
+<CardContent className="overflow-x-auto">
+  {isLoading || isFetching ? (
+    <LoadingIndicator />
+  ) : !submittedPath ? (
+    <div className="text-center py-10 text-muted-foreground">
+      Enter a report path above and press <span className="font-medium">Enter</span>.
+    </div>
+  ) : reportNotFound ? (
+    <div className="py-16 text-center">
+      <div className="text-lg font-semibold text-red-600">Report not found</div>
+      <div className="text-sm text-muted-foreground mt-2">
+        No views were found for this report path.
+      </div>
+    </div>
+  ) : (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          {columnConfig.map((col) => (
+            <TableHead key={col.key}>
+              <Button
+                variant="ghost"
+                className="px-0 h-auto font-medium"
+                onClick={() => onSort(col.key)}
+              >
+                {col.label}
+                <span className="ml-2 text-muted-foreground">
+                  {sortIcon(sortKey === col.key, sortDir)}
+                </span>
+              </Button>
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+
+      <TableBody>
+        {finalRows.length === 0 ? (
+          <TableRow>
+            <TableCell colSpan={columnConfig.length} className="text-center py-6">
+              No matching results
+            </TableCell>
+          </TableRow>
+        ) : (
+          finalRows.map((r, idx) => (
+            <TableRow key={idx}>
+              {columnConfig.map((col) => (
+                <TableCell key={col.key}>
+                  {col.key === "logged_time"
+                    ? formatDateTime(r?.[col.key])
+                    : normalize(r?.[col.key])}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))
+        )}
+      </TableBody>
+    </Table>
+  )}
+</CardContent>
+
+
+
+
 {reportNotFound ? (
   <TableRow>
     <TableCell colSpan={visibleKeys.length} className="text-center py-8 text-red-600 font-medium">
