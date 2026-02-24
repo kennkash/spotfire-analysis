@@ -1,3 +1,232 @@
+def enrich_with_employee_data(
+    df_in: pd.DataFrame,
+    email_col: str,
+    username_col: str,
+) -> pd.DataFrame:
+    """
+    Employee enrichment pipeline extracted from get_cached_final_df().
+
+    Produces/fills:
+      - FULL_NAME
+      - STATUS_NAME
+      - cost_center_name
+      - dept_name
+      - title
+    """
+    df = df_in.copy()
+
+    out_cols = ["FULL_NAME", "STATUS_NAME", "cost_center_name", "dept_name", "title"]
+
+    # --- Preserve any existing values, but DROP to avoid duplicate columns after merge ---
+    existing = pd.DataFrame(index=df.index)
+    for c in out_cols:
+        if c in df.columns:
+            existing[c] = df[c]
+        else:
+            existing[c] = None
+
+    df.drop(columns=[c for c in out_cols if c in df.columns], inplace=True, errors="ignore")
+
+    # Normalize email/username inputs
+    if email_col not in df.columns:
+        df[email_col] = None
+    df[email_col] = (
+        df[email_col]
+        .where(df[email_col].notna(), None)
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace({"nan": None})
+    )
+
+    if username_col not in df.columns:
+        df[username_col] = None
+    df[username_col] = (
+        df[username_col]
+        .where(df[username_col].notna(), None)
+        .astype(str)
+        .str.strip()
+        .replace({"nan": None})
+    )
+
+    # Internal helper cols
+    df["_EMAIL_ALT"] = (
+        df[email_col]
+        .apply(_partner_to_samsung_email)
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace({"nan": None})
+    )
+    df["_EMAIL_LOCAL"] = df[email_col].apply(_email_localpart)
+
+    # Load primary employee data
+    user_data = _get_primary_employee_data().copy()
+
+    # Normalize lookup keys
+    for col in ["smtp", "bname", "nt_id", "gad_id"]:
+        if col in user_data.columns:
+            user_data[col] = user_data[col].astype(str).str.strip().str.lower()
+
+    # Normalize values
+    for col in ["full_name", "status_name", "cost_center_name", "dept_name", "title"]:
+        if col in user_data.columns:
+            user_data[col] = user_data[col].astype(str).str.strip().replace({"nan": None})
+
+    # 1) Primary merge on email -> smtp (NO renaming to FULL_NAME to avoid collisions)
+    merged = df.merge(
+        user_data,
+        how="left",
+        left_on=email_col,
+        right_on="smtp",
+        suffixes=("", "_emp"),
+    ).drop(columns=["smtp"], errors="ignore")
+
+    # Create output columns from existing first, then fill from employee merge
+    merged["FULL_NAME"] = existing["FULL_NAME"].copy()
+    merged["STATUS_NAME"] = existing["STATUS_NAME"].copy()
+    merged["cost_center_name"] = existing["cost_center_name"].copy()
+    merged["dept_name"] = existing["dept_name"].copy()
+    merged["title"] = existing["title"].copy()
+
+    # Fill from primary merge
+    if "full_name" in merged.columns:
+        merged["FULL_NAME"] = merged["FULL_NAME"].fillna(merged["full_name"])
+    if "status_name" in merged.columns:
+        merged["STATUS_NAME"] = merged["STATUS_NAME"].fillna(merged["status_name"])
+    for col in ["cost_center_name", "dept_name", "title"]:
+        if col in merged.columns:
+            merged[col] = merged[col].fillna(merged[col])
+
+    # 2) Fallback merge ONLY where FULL_NAME is missing
+    missing_mask = merged["FULL_NAME"].isna()
+    if missing_mask.any():
+        fallback_emp = _get_fallback_employee_data().copy()
+        if "smtp" in fallback_emp.columns:
+            fallback_emp["smtp"] = fallback_emp["smtp"].astype(str).str.strip().str.lower()
+
+        to_fix = merged.loc[missing_mask].merge(
+            fallback_emp,
+            how="left",
+            left_on=email_col,
+            right_on="smtp",
+            suffixes=("", "_fb"),
+        )
+
+        key_series = merged.loc[missing_mask, email_col]
+
+        if "full_name" in to_fix.columns:
+            name_map = to_fix.set_index(email_col)["full_name"].to_dict()
+            merged.loc[missing_mask, "FULL_NAME"] = merged.loc[missing_mask, "FULL_NAME"].fillna(
+                key_series.map(name_map)
+            )
+
+        if "status_name" in to_fix.columns:
+            status_map = to_fix.set_index(email_col)["status_name"].to_dict()
+            merged.loc[missing_mask, "STATUS_NAME"] = merged.loc[missing_mask, "STATUS_NAME"].fillna(
+                key_series.map(status_map)
+            )
+
+        for col in ["cost_center_name", "dept_name", "title"]:
+            if col in to_fix.columns:
+                col_map = to_fix.set_index(email_col)[col].to_dict()
+                merged.loc[missing_mask, col] = merged.loc[missing_mask, col].fillna(
+                    key_series.map(col_map)
+                )
+
+    # 3) Partner email repair (still missing + partner email)
+    still_missing = merged["FULL_NAME"].isna()
+    partner_missing = still_missing & merged[email_col].astype(str).str.contains("@partner.samsung", na=False)
+
+    if partner_missing.any():
+        to_fix2 = merged.loc[partner_missing].merge(
+            user_data,
+            how="left",
+            left_on="_EMAIL_ALT",
+            right_on="smtp",
+            suffixes=("", "_alt"),
+        )
+
+        key_series = merged.loc[partner_missing, email_col]
+
+        if "full_name" in to_fix2.columns:
+            name_map2 = to_fix2.set_index(email_col)["full_name"].to_dict()
+            merged.loc[partner_missing, "FULL_NAME"] = merged.loc[partner_missing, "FULL_NAME"].fillna(
+                key_series.map(name_map2)
+            )
+
+        if "status_name" in to_fix2.columns:
+            status_map2 = to_fix2.set_index(email_col)["status_name"].to_dict()
+            merged.loc[partner_missing, "STATUS_NAME"] = merged.loc[partner_missing, "STATUS_NAME"].fillna(
+                key_series.map(status_map2)
+            )
+
+        for col in ["cost_center_name", "dept_name", "title"]:
+            if col in to_fix2.columns:
+                col_map2 = to_fix2.set_index(email_col)[col].to_dict()
+                merged.loc[partner_missing, col] = merged.loc[partner_missing, col].fillna(
+                    key_series.map(col_map2)
+                )
+
+    # 4) Additional resolution passes
+    missing = merged["FULL_NAME"].isna()
+    if missing.any() and "bname" in user_data.columns:
+        user_bname = user_data.dropna(subset=["bname"]).copy()
+        merged = _fill_missing_from_key(
+            merged=merged,
+            missing_mask=missing,
+            lookup=user_bname,
+            lookup_key="bname",
+            left_key_series=merged.loc[missing, username_col],
+        )
+
+    missing = merged["FULL_NAME"].isna()
+    if missing.any() and "nt_id" in user_data.columns:
+        user_ntid = user_data.dropna(subset=["nt_id"]).copy()
+        merged = _fill_missing_from_key(
+            merged=merged,
+            missing_mask=missing,
+            lookup=user_ntid,
+            lookup_key="nt_id",
+            left_key_series=merged.loc[missing, username_col],
+        )
+
+    missing = merged["FULL_NAME"].isna()
+    if missing.any() and "gad_id" in user_data.columns:
+        user_gad = user_data.dropna(subset=["gad_id"]).copy()
+        merged = _fill_missing_from_key(
+            merged=merged,
+            missing_mask=missing,
+            lookup=user_gad,
+            lookup_key="gad_id",
+            left_key_series=merged.loc[missing, "_EMAIL_LOCAL"],
+        )
+
+    # 5) Final fallback
+    final_missing = merged["FULL_NAME"].isna()
+    if final_missing.any():
+        merged.loc[final_missing, "FULL_NAME"] = "Possibly Terminated"
+        merged.loc[final_missing, "STATUS_NAME"] = merged.loc[final_missing, "STATUS_NAME"].fillna("Unknown")
+        for col in ["cost_center_name", "dept_name", "title"]:
+            merged.loc[final_missing, col] = merged.loc[final_missing, col].fillna("Unknown")
+
+    # Cleanup helper cols and employee raw cols
+    merged.drop(columns=["_EMAIL_ALT", "_EMAIL_LOCAL"], inplace=True, errors="ignore")
+    merged.drop(columns=["full_name", "status_name"], inplace=True, errors="ignore")
+
+    return merged
+
+
+
+
+
+
+
+
+
+
+
+
 from fastapi import APIRouter, Query, HTTPException
 from typing import List, Dict, Any, Optional
 import pandas as pd
