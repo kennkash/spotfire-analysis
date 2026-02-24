@@ -1,3 +1,39 @@
+const columnConfig: { key: string; label: string }[] = [
+  { key: "FULL_NAME", label: "Full Name" },
+  { key: "user_name", label: "Username" },
+  { key: "email", label: "Email" },
+  { key: "cost_center_name", label: "Cost Center" },
+  { key: "dept_name", label: "Department" },
+  { key: "title", label: "Title" },
+  { key: "STATUS_NAME", label: "Employee Status" },
+  { key: "logged_time", label: "Last Viewed" },
+]
+
+
+{columnConfig.map((col) => (
+  <TableHead key={col.key}>
+    <Button
+      variant="ghost"
+      className="px-0 h-auto font-medium"
+      onClick={() => onSort(col.key)}
+    >
+      {col.label}
+      <span className="ml-2 text-muted-foreground">
+        {sortIcon(sortKey === col.key, sortDir)}
+      </span>
+    </Button>
+  </TableHead>
+))}
+
+
+{columnConfig.map((col) => (
+  <TableCell key={col.key}>
+    {normalize(r?.[col.key])}
+  </TableCell>
+))}
+
+
+
 // spotfire-license-hub/src/components/report-views/report-views-view.tsx
 
 "use client"
