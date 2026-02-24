@@ -1,4 +1,20 @@
-const totalUniqueViewers = rows.length
+{reportNotFound ? (
+  <TableRow>
+    <TableCell colSpan={visibleKeys.length} className="text-center py-8 text-red-600 font-medium">
+      Report not found
+    </TableCell>
+  </TableRow>
+) : finalRows.length === 0 ? (
+  <TableRow>
+    <TableCell colSpan={visibleKeys.length} className="text-center py-6">
+      No matching results
+    </TableCell>
+  </TableRow>
+) : (
+  
+ 
+ 
+ const totalUniqueViewers = rows.length
 
 
 {!!submittedPath && rows.length > 0 && (
