@@ -1,3 +1,54 @@
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Info } from "lucide-react"
+
+
+<div className="flex items-center justify-between">
+  <CardTitle>Report Views</CardTitle>
+
+  <Dialog>
+    <DialogTrigger asChild>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="How to find a report path"
+        title="How to find a report path"
+      >
+        <Info className="h-4 w-4" />
+      </Button>
+    </DialogTrigger>
+
+    <DialogContent className="sm:max-w-[520px]">
+      <DialogHeader>
+        <DialogTitle>Locate a report&apos;s path</DialogTitle>
+      </DialogHeader>
+
+      <div className="space-y-3 text-sm text-muted-foreground">
+        <ol className="space-y-2 list-decimal pl-5">
+          <li>Navigate to Spotfire and open the report</li>
+          <li>
+            In the toolbar, select <strong>File &gt; Document Properties</strong>
+          </li>
+          <li>In the Document Properties menu, select the <strong>Library</strong> tab</li>
+          <li>
+            Copy the report path that follows <code>:analysis:</code> in the Library URL
+          </li>
+        </ol>
+
+        <div className="rounded border bg-background p-3">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Example</div>
+          <code className="text-xs break-all">
+            :analysis:/31_S.LSI/04 Team/Spotfire/Jane Doe/Spotfire_Analysis
+          </code>
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
+</div>
+
+
+
+
 How can I put the section "Locate a report's path" in an info icon somewhere instead that show it in a pop-up dialog ? I am not sure where to put it but somewhere that makes sense:
 
 
