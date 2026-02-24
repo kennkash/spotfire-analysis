@@ -1,3 +1,39 @@
+const hasSubmitted = !!submittedPath
+const buttonLabel = hasSubmitted ? "Refetch" : "Fetch"
+
+const onFetchOrRefetch = async () => {
+  // If we've already loaded a report, just refetch the current query
+  if (hasSubmitted) {
+    await refetch()
+    return
+  }
+
+  // Otherwise do the initial fetch
+  onSubmit()
+}
+
+
+<Button
+  onClick={onFetchOrRefetch}
+  disabled={
+    (hasSubmitted ? false : !reportPath.trim()) || isLoading || isFetching
+  }
+  className="hover:cursor-pointer"
+>
+  {buttonLabel}
+</Button>
+
+
+const onSubmit = () => {
+  const v = reportPath.trim()
+  if (!v) return
+  setSubmittedPath(v)
+  setReportPath(v) // optional
+}
+
+
+
+
 const filterKeys = React.useMemo(
   () => columnConfig.map(c => c.key),
   [columnConfig]
