@@ -20,7 +20,11 @@ merged["FULL_NAME"] = existing["FULL_NAME"].copy().fillna(emp_full)
 merged["STATUS_NAME"] = existing["STATUS_NAME"].copy().fillna(emp_status)
 merged["cost_center_name"] = existing["cost_center_name"].copy().fillna(emp_cc)
 merged["dept_name"] = existing["dept_name"].copy().fillna(emp_dept)
-merged["title"] = existing["title"].copy().fillna(emp_title)def enrich_with_employee_data(
+merged["title"] = existing["title"].copy().fillna(emp_title)
+
+
+
+def enrich_with_employee_data(
     df_in: pd.DataFrame,
     email_col: str,
     username_col: str,
