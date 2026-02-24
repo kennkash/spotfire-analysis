@@ -1,3 +1,18 @@
+# --- Keep only the latest view per user_name ---
+if "logged_time" in df_reports.columns and "user_name" in df_reports.columns:
+    # Make sure logged_time is datetime (handles strings like 2026-02-05T15:59:45)
+    df_reports["logged_time"] = pd.to_datetime(df_reports["logged_time"], errors="coerce", utc=True)
+
+    # Sort newest first, then drop duplicates per user
+    df_reports = (
+        df_reports.sort_values(["user_name", "logged_time"], ascending=[True, False])
+        .drop_duplicates(subset=["user_name"], keep="first")
+        .reset_index(drop=True)
+    )
+
+
+
+
 # 1) Primary merge on email -> smtp (NO renaming to FULL_NAME to avoid collisions)
 merged = df.merge(
     user_data,
