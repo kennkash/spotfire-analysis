@@ -1,3 +1,29 @@
+function formatDateTime(value: any) {
+  if (!value) return ""
+
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return value // fallback if not valid
+
+  const pad = (n: number) => String(n).padStart(2, "0")
+
+  const month = pad(d.getMonth() + 1)
+  const day = pad(d.getDate())
+  const year = d.getFullYear()
+
+  const hours = pad(d.getHours())
+  const minutes = pad(d.getMinutes())
+  const seconds = pad(d.getSeconds())
+
+  return `${month}-${day}-${year} ${hours}:${minutes}:${seconds}`
+}
+
+{col.key === "logged_time"
+  ? formatDateTime(r?.[col.key])
+  : normalize(r?.[col.key])}
+
+
+
+
 const columnConfig: { key: string; label: string }[] = [
   { key: "FULL_NAME", label: "Full Name" },
   { key: "user_name", label: "Username" },
