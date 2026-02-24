@@ -9,7 +9,38 @@ if "logged_time" in df_reports.columns and "user_name" in df_reports.columns:
         .drop_duplicates(subset=["user_name"], keep="first")
         .reset_index(drop=True)
     )
+# --- Final dedupe by email (keep latest logged_time) ---
+if "logged_time" in df_reports.columns:
+    df_reports["logged_time"] = pd.to_datetime(df_reports["logged_time"], errors="coerce", utc=True)
 
+if "email" in df_reports.columns:
+    email_norm = (
+        df_reports["email"]
+        .where(df_reports["email"].notna(), None)
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace({"nan": None, "": None})
+    )
+    df_reports["email"] = email_norm
+
+    has_email = df_reports["email"].notna()
+
+    # Dedupe only the rows that have an email (avoid collapsing all NaN into one row)
+    df_with_email = (
+        df_reports.loc[has_email]
+        .sort_values(["email", "logged_time"], ascending=[True, False])
+        .drop_duplicates(subset=["email"], keep="first")
+    )
+
+    # Keep all rows with missing email (or, if you prefer, dedupe those by user_name too)
+    df_no_email = df_reports.loc[~has_email]
+
+    df_reports = (
+        pd.concat([df_with_email, df_no_email], ignore_index=True)
+        .sort_values("logged_time", ascending=False)
+        .reset_index(drop=True)
+    )
 
 
 
