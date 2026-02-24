@@ -1,3 +1,18 @@
+const filterKeys = React.useMemo(
+  () => columnConfig.map(c => c.key),
+  [columnConfig]
+)
+
+const filteredRows = React.useMemo(() => {
+  const q = normalize(search).toLowerCase()
+  if (!q) return rows
+
+  return rows.filter((r) =>
+    filterKeys.some((k) => normalize(r?.[k]).toLowerCase().includes(q))
+  )
+}, [rows, search, filterKeys])
+
+
 Why when I try to filter for "IT Services" using the text input filter box, does it not filter down? I can see rows where department = IT Services
 
 
