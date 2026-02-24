@@ -1,6 +1,3 @@
-How can I make /report-views more efficient? The load time is pretty slow right now.
-
-
 from fastapi import APIRouter, Query, HTTPException
 from typing import List, Dict, Any, Optional
 import pandas as pd
@@ -24,6 +21,8 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 CACHE_TTL_SECONDS = 86400  # 24 hours
+LOOKUP_TTL_SECONDS = 6 * 60 * 60  # 6 hours (Spotfire users + employee tables)
+REPORT_VIEWS_TTL_SECONDS = 10 * 60  # 10 minutes (per report_path)
 
 LICENSE_COLS = [
     "USER_NAME",
@@ -249,7 +248,92 @@ def _fill_missing_email_from_employee_ids(
     # normalize final email
     df[email_col] = df[email_col].where(df[email_col].notna(), None)
     if df[email_col].notna().any():
-        df[email_col] = df[email_col].astype(str).str.strip().str.lower().replace({"nan": None})
+        df[email_col] = df[email_col].astype(str).str.strip().str.lower().replace({"nan": None, "": None})
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Cached lookups (big wins: avoid re-pulling same Trino tables per request)
+# ---------------------------------------------------------------------------
+
+
+@cached(ttl=LOOKUP_TTL_SECONDS, serializer=PickleSerializer())
+async def get_cached_sf_users() -> pd.DataFrame:
+    """
+    Spotfire user mapping table (display_name, email, user_name).
+    Cached because it is reused across report-views calls.
+    """
+    params = {"data_type": "spotfire_if2sf_users", "MLR": "T"}
+    df = getData(params=params, custom_columns=["display_name", "email", "user_name"])
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["user_name", "display_name", "email"])
+
+    df = df.copy()
+    df["user_name"] = df["user_name"].astype(str).str.strip()
+    if "email" in df.columns:
+        df["email"] = (
+            df["email"]
+            .where(df["email"].notna(), None)
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .replace({"nan": None, "": None})
+        )
+    return df
+
+
+@cached(ttl=LOOKUP_TTL_SECONDS, serializer=PickleSerializer())
+async def get_cached_primary_emp() -> pd.DataFrame:
+    """
+    Primary employee table cached + normalized once.
+    """
+    df = _get_primary_employee_data()
+    if df is None or df.empty:
+        return pd.DataFrame(
+            columns=[
+                "smtp",
+                "bname",
+                "nt_id",
+                "gad_id",
+                "full_name",
+                "status_name",
+                "cost_center_name",
+                "dept_name",
+                "title",
+            ]
+        )
+
+    df = df.copy()
+
+    for col in ["smtp", "bname", "nt_id", "gad_id"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.lower()
+
+    for col in ["full_name", "status_name", "cost_center_name", "dept_name", "title"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().replace({"nan": None})
+
+    return df
+
+
+@cached(ttl=LOOKUP_TTL_SECONDS, serializer=PickleSerializer())
+async def get_cached_fallback_emp() -> pd.DataFrame:
+    """
+    Fallback employee table cached + normalized once.
+    """
+    df = _get_fallback_employee_data()
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["smtp", "full_name", "status_name", "cost_center_name", "dept_name", "title"])
+
+    df = df.copy()
+
+    if "smtp" in df.columns:
+        df["smtp"] = df["smtp"].astype(str).str.strip().str.lower()
+
+    for col in ["full_name", "status_name", "cost_center_name", "dept_name", "title"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().replace({"nan": None})
 
     return df
 
@@ -258,9 +342,11 @@ def enrich_with_employee_data(
     df_in: pd.DataFrame,
     email_col: str,
     username_col: str,
+    primary_emp: Optional[pd.DataFrame] = None,
+    fallback_emp: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
-    Employee enrichment pipeline extracted from get_cached_final_df().
+    Employee enrichment pipeline.
 
     Produces/fills:
       - FULL_NAME
@@ -268,6 +354,8 @@ def enrich_with_employee_data(
       - cost_center_name
       - dept_name
       - title
+
+    Perf change: can accept preloaded/cached employee tables to avoid re-pulling Trino.
     """
     df = df_in.copy()
 
@@ -292,7 +380,7 @@ def enrich_with_employee_data(
         .astype(str)
         .str.strip()
         .str.lower()
-        .replace({"nan": None})
+        .replace({"nan": None, "": None})
     )
 
     if username_col not in df.columns:
@@ -312,14 +400,14 @@ def enrich_with_employee_data(
         .astype(str)
         .str.strip()
         .str.lower()
-        .replace({"nan": None})
+        .replace({"nan": None, "": None})
     )
     df["_EMAIL_LOCAL"] = df[email_col].apply(_email_localpart)
 
-    # Load primary employee data
-    user_data = _get_primary_employee_data().copy()
+    # Load primary employee data (prefer injected cached)
+    user_data = (primary_emp if primary_emp is not None else _get_primary_employee_data()).copy()
 
-    # Normalize lookup keys
+    # Normalize lookup keys (safe even if already normalized)
     for col in ["smtp", "bname", "nt_id", "gad_id"]:
         if col in user_data.columns:
             user_data[col] = user_data[col].astype(str).str.strip().str.lower()
@@ -329,20 +417,29 @@ def enrich_with_employee_data(
         if col in user_data.columns:
             user_data[col] = user_data[col].astype(str).str.strip().replace({"nan": None})
 
-    # 1) Primary merge on email -> smtp (NO renaming to FULL_NAME to avoid collisions)
-    merged = df.merge(
-    user_data,
-    how="left",
-    left_on=email_col,
-    right_on="smtp",
-    suffixes=("", "_emp"),
-    ).drop(columns=["smtp"], errors="ignore")
+    # 1) Primary merge on email -> smtp
+    merged = (
+        df.merge(
+            user_data,
+            how="left",
+            left_on=email_col,
+            right_on="smtp",
+            suffixes=("", "_emp"),
+        )
+        .drop(columns=["smtp"], errors="ignore")
+    )
 
     # --- Capture employee values BEFORE we overlay "existing" columns ---
     emp_full = merged["full_name"] if "full_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
-    emp_status = merged["status_name"] if "status_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
+    emp_status = (
+        merged["status_name"] if "status_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
+    )
 
-    emp_cc = merged["cost_center_name"] if "cost_center_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
+    emp_cc = (
+        merged["cost_center_name"]
+        if "cost_center_name" in merged.columns
+        else pd.Series(index=merged.index, dtype="object")
+    )
     emp_dept = merged["dept_name"] if "dept_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
     emp_title = merged["title"] if "title" in merged.columns else pd.Series(index=merged.index, dtype="object")
 
@@ -353,24 +450,15 @@ def enrich_with_employee_data(
     merged["dept_name"] = existing["dept_name"].copy().fillna(emp_dept)
     merged["title"] = existing["title"].copy().fillna(emp_title)
 
-    # Fill from primary merge
-    if "full_name" in merged.columns:
-        merged["FULL_NAME"] = merged["FULL_NAME"].fillna(merged["full_name"])
-    if "status_name" in merged.columns:
-        merged["STATUS_NAME"] = merged["STATUS_NAME"].fillna(merged["status_name"])
-    for col in ["cost_center_name", "dept_name", "title"]:
-        if col in merged.columns:
-            merged[col] = merged[col].fillna(merged[col])
-
     # 2) Fallback merge ONLY where FULL_NAME is missing
     missing_mask = merged["FULL_NAME"].isna()
     if missing_mask.any():
-        fallback_emp = _get_fallback_employee_data().copy()
-        if "smtp" in fallback_emp.columns:
-            fallback_emp["smtp"] = fallback_emp["smtp"].astype(str).str.strip().str.lower()
+        fb = (fallback_emp if fallback_emp is not None else _get_fallback_employee_data()).copy()
+        if "smtp" in fb.columns:
+            fb["smtp"] = fb["smtp"].astype(str).str.strip().str.lower()
 
         to_fix = merged.loc[missing_mask].merge(
-            fallback_emp,
+            fb,
             how="left",
             left_on=email_col,
             right_on="smtp",
@@ -394,9 +482,7 @@ def enrich_with_employee_data(
         for col in ["cost_center_name", "dept_name", "title"]:
             if col in to_fix.columns:
                 col_map = to_fix.set_index(email_col)[col].to_dict()
-                merged.loc[missing_mask, col] = merged.loc[missing_mask, col].fillna(
-                    key_series.map(col_map)
-                )
+                merged.loc[missing_mask, col] = merged.loc[missing_mask, col].fillna(key_series.map(col_map))
 
     # 3) Partner email repair (still missing + partner email)
     still_missing = merged["FULL_NAME"].isna()
@@ -428,9 +514,7 @@ def enrich_with_employee_data(
         for col in ["cost_center_name", "dept_name", "title"]:
             if col in to_fix2.columns:
                 col_map2 = to_fix2.set_index(email_col)[col].to_dict()
-                merged.loc[partner_missing, col] = merged.loc[partner_missing, col].fillna(
-                    key_series.map(col_map2)
-                )
+                merged.loc[partner_missing, col] = merged.loc[partner_missing, col].fillna(key_series.map(col_map2))
 
     # 4) Additional resolution passes
     missing = merged["FULL_NAME"].isna()
@@ -493,41 +577,44 @@ async def get_cached_final_df() -> pd.DataFrame:
 
     1) Load base rows from PostgreSQL (analyst_functions_users)
     2) Compute recommendedAction
-    3) Employee enrichment (reusable function) to get FULL_NAME + STATUS_NAME + org fields
+    3) Employee enrichment to get FULL_NAME + STATUS_NAME + org fields
+       (now uses cached employee tables)
     """
-    # 1) Load base data from Postgres
     df = get_license_df()
     df.columns = [c.strip() for c in df.columns]
     df = df.where(df.notna(), None)
 
     # Normalize email fields early (helps joins)
     if "USER_EMAIL" in df.columns:
-        df["USER_EMAIL"] = df["USER_EMAIL"].astype(str).str.strip().str.lower()
+        df["USER_EMAIL"] = df["USER_EMAIL"].astype(str).str.strip().str.lower().replace({"nan": None, "": None})
     if "USER_NAME" in df.columns:
-        df["USER_NAME"] = df["USER_NAME"].astype(str).str.strip()
+        df["USER_NAME"] = df["USER_NAME"].astype(str).str.strip().replace({"nan": None})
 
     # Numeric conversion (db can still give strings depending on driver/types)
     if "ANALYST_ACTIONS_PER_DAY" in df.columns:
         df["ANALYST_ACTIONS_PER_DAY"] = pd.to_numeric(df["ANALYST_ACTIONS_PER_DAY"], errors="coerce").fillna(0)
 
     # Compute recommendedAction once
-    df["recommendedAction"] = df["ANALYST_ACTIONS_PER_DAY"].apply(
-        lambda x: "Analyst" if float(x) >= 1 else "Consumer"
-    )
+    df["recommendedAction"] = df["ANALYST_ACTIONS_PER_DAY"].apply(lambda x: "Analyst" if float(x) >= 1 else "Consumer")
 
     # Keep these for debug endpoint parity
-    df["USER_EMAIL_ALT"] = (
-        df["USER_EMAIL"].apply(_partner_to_samsung_email).astype(str).str.strip().str.lower()
-    )
+    df["USER_EMAIL_ALT"] = df["USER_EMAIL"].apply(_partner_to_samsung_email)
     df["USER_EMAIL_LOCAL"] = df["USER_EMAIL"].apply(_email_localpart)
 
-    # Ensure org fields exist so downstream fillna logic doesn't KeyError
     for col in ["cost_center_name", "dept_name", "title"]:
         if col not in df.columns:
             df[col] = None
 
-    # 3) Employee enrichment
-    merged = enrich_with_employee_data(df, email_col="USER_EMAIL", username_col="USER_NAME")
+    primary_emp = await get_cached_primary_emp()
+    fallback_emp = await get_cached_fallback_emp()
+
+    merged = enrich_with_employee_data(
+        df,
+        email_col="USER_EMAIL",
+        username_col="USER_NAME",
+        primary_emp=primary_emp,
+        fallback_emp=fallback_emp,
+    )
 
     return merged
 
@@ -576,7 +663,6 @@ async def get_license_reduction(
 
     def row_to_ui(r: pd.Series) -> Dict[str, Any]:
         return {
-            # UI-visible columns
             "name": safe(r.get("FULL_NAME")),
             "statusName": safe(r.get("STATUS_NAME")),
             "user": safe(r.get("USER_NAME")),
@@ -585,7 +671,6 @@ async def get_license_reduction(
             "departmentName": safe(r.get("dept_name")),
             "title": safe(r.get("title")),
             "recommendedAction": safe(r.get("recommendedAction")),
-            # Extra fields (optional; safe to keep for later UI expansion)
             "lastActivity": safe(r.get("LAST_ACTIVITY")),
             "analystActionsPerDay": float(r.get("ANALYST_ACTIONS_PER_DAY") or 0),
             "analystFunctions": int(r.get("ANALYST_FUNCTIONS") or 0),
@@ -626,12 +711,29 @@ async def get_missing_full_names() -> List[Dict[str, Any]]:
     ]
 
 
-@router.post("/report-views")
-async def get_report_views(req: ViewedReportsRequest):
+# ---------------------------------------------------------------------------
+# /report-views caching (per report_path)
+# ---------------------------------------------------------------------------
+
+
+def _report_views_cache_key(func, *args, **kwargs) -> str:
+    # args[0] should be report_path in our cached worker
+    report_path = args[0] if args else kwargs.get("report_path", "")
+    return f"report_views:{report_path}"
+
+
+@cached(ttl=REPORT_VIEWS_TTL_SECONDS, serializer=PickleSerializer(), key_builder=_report_views_cache_key)
+async def _get_report_views_cached(report_path: str) -> List[Dict[str, Any]]:
     """
-    Returns views for a passed report
+    Cached worker: does the heavy lifting for /report-views.
+    Major perf improvements:
+      - caches SF users and employee tables (Trino pulls) for LOOKUP_TTL_SECONDS
+      - caches report views per report_path for REPORT_VIEWS_TTL_SECONDS
+      - avoids DataFrame merge for sf_users: uses dict mapping (fast for small result sets)
+      - parses logged_time once
+      - single dedupe strategy (email preferred, fallback to user_name)
+      - avoids df.fillna("") (expensive, and forces string conversions)
     """
-    # 30-day cutoff (comment said 90 but code uses 30)
     cutoff_dt = datetime.utcnow() - timedelta(days=30)
     cutoff_dt = cutoff_dt.replace(hour=0, minute=0, second=0, microsecond=0)
     cutoff_str = cutoff_dt.strftime("%d-%b-%y %I.%M.%S.%f %p")
@@ -645,7 +747,7 @@ async def get_report_views(req: ViewedReportsRequest):
             "logged_time": cutoff_str,
             "success": "1",
             "arg1": "dxp",
-            "id2": req.report_path,
+            "id2": report_path,
             "user_name": [
                 "SPOTFIRESYSTEM\\automationservices",
                 "SPOTFIRESYSTEM\\monitoring",
@@ -656,105 +758,92 @@ async def get_report_views(req: ViewedReportsRequest):
         custom_columns=["id2", "log_action", "log_category", "logged_time", "user_name", "session_id"],
         custom_operators={"log_category": "like", "user_name": "!", "logged_time": ">="},
     )
-    
-    if df_reports.empty:
-        return []
-    # --- Keep only the latest view per user_name ---
-    if "logged_time" in df_reports.columns and "user_name" in df_reports.columns:
-        # Make sure logged_time is datetime (handles strings like 2026-02-05T15:59:45)
-        df_reports["logged_time"] = pd.to_datetime(df_reports["logged_time"], errors="coerce", utc=True)
 
-        # Sort newest first, then drop duplicates per user
+    if df_reports is None or df_reports.empty:
+        return []
+
+    df_reports = df_reports.copy()
+
+    # Parse once, drop bad times
+    df_reports["logged_time"] = pd.to_datetime(df_reports["logged_time"], errors="coerce", utc=True)
+    df_reports = df_reports.dropna(subset=["logged_time"])
+
+    # Latest per user_name early (shrinks data ASAP)
+    if "user_name" in df_reports.columns:
+        df_reports["user_name"] = df_reports["user_name"].astype(str).str.strip()
         df_reports = (
             df_reports.sort_values(["user_name", "logged_time"], ascending=[True, False])
             .drop_duplicates(subset=["user_name"], keep="first")
             .reset_index(drop=True)
         )
 
-    # Pull Spotfire users mapping (display_name, email)
-    params = {"data_type": "spotfire_if2sf_users", "MLR": "T"}
-    custom_columns = ["display_name", "email", "user_name"]
-    sf_users = getData(params=params, custom_columns=custom_columns)
+    # Cached lookups
+    sf_users = await get_cached_sf_users()
+    primary_emp = await get_cached_primary_emp()
+    fallback_emp = await get_cached_fallback_emp()
 
-    # Merge df_reports with Spotfire user data (exact join on user_name)
-    df_reports = df_reports.merge(sf_users, on="user_name", how="left", suffixes=("", "_user"))
-
-    # Ensure email exists as a column
-    if "email" not in df_reports.columns:
+    # Map SF user email/display_name instead of merge (faster for small frames)
+    if sf_users is not None and not sf_users.empty:
+        email_map = sf_users.set_index("user_name")["email"].to_dict() if "email" in sf_users.columns else {}
+        display_map = (
+            sf_users.set_index("user_name")["display_name"].to_dict() if "display_name" in sf_users.columns else {}
+        )
+        df_reports["email"] = df_reports["user_name"].map(email_map)
+        df_reports["display_name"] = df_reports["user_name"].map(display_map)
+    else:
         df_reports["email"] = None
+        df_reports["display_name"] = None
 
-    # If email missing, resolve email via employee ids: user_name -> (bname/nt_id/gad_id) -> smtp
-    primary_emp = _get_primary_employee_data().copy()
+    # Fill missing emails via employee ids (cached primary)
     df_reports = _fill_missing_email_from_employee_ids(
         df_in=df_reports,
         employee_df=primary_emp,
         user_name_col="user_name",
         email_col="email",
     )
-    
-    # --- Final dedupe by email (keep latest logged_time) ---
-    if "logged_time" in df_reports.columns:
-        df_reports["logged_time"] = pd.to_datetime(df_reports["logged_time"], errors="coerce", utc=True)
 
-    if "email" in df_reports.columns:
-        email_norm = (
-            df_reports["email"]
-            .where(df_reports["email"].notna(), None)
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .replace({"nan": None, "": None})
-        )
-        df_reports["email"] = email_norm
+    # Normalize email once
+    df_reports["email"] = (
+        df_reports["email"]
+        .where(df_reports["email"].notna(), None)
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace({"nan": None, "": None})
+    )
 
-        has_email = df_reports["email"].notna()
+    # Single dedupe strategy: prefer email, fallback to user_name
+    df_reports["_dedupe_key"] = df_reports["email"].fillna(df_reports["user_name"])
+    df_reports = (
+        df_reports.sort_values(["_dedupe_key", "logged_time"], ascending=[True, False])
+        .drop_duplicates(subset=["_dedupe_key"], keep="first")
+        .drop(columns=["_dedupe_key"])
+        .sort_values("logged_time", ascending=False)
+        .reset_index(drop=True)
+    )
 
-        # Dedupe only the rows that have an email (avoid collapsing all NaN into one row)
-        df_with_email = (
-            df_reports.loc[has_email]
-            .sort_values(["email", "logged_time"], ascending=[True, False])
-            .drop_duplicates(subset=["email"], keep="first")
-        )
+    # Employee enrichment (cached tables injected)
+    df_reports = enrich_with_employee_data(
+        df_reports,
+        email_col="email",
+        username_col="user_name",
+        primary_emp=primary_emp,
+        fallback_emp=fallback_emp,
+    )
 
-        # Keep all rows with missing email (or, if you prefer, dedupe those by user_name too)
-        df_no_email = df_reports.loc[~has_email]
-
-        df_reports = (
-            pd.concat([df_with_email, df_no_email], ignore_index=True)
-            .sort_values("logged_time", ascending=False)
-            .reset_index(drop=True)
-        )
-
-    # Now enrich FULL_NAME + STATUS_NAME + org fields using the reusable pipeline
-    df_reports = enrich_with_employee_data(df_reports, email_col="email", username_col="user_name")
-    
-    # --- Dedupe by FULL_NAME (keep latest logged_time) ---
-    if "FULL_NAME" in df_reports.columns:
-        has_full_name = df_reports["FULL_NAME"].notna()
-
-        # For rows with FULL_NAME: dedupe by FULL_NAME, keep latest logged_time
-        df_with_full_name = (
-            df_reports.loc[has_full_name]
-            .sort_values(["FULL_NAME", "logged_time"], ascending=[True, False])
-            .drop_duplicates(subset=["FULL_NAME"], keep="first")
-        )
-
-        # For rows without FULL_NAME: keep as-is
-        df_no_full_name = df_reports.loc[~has_full_name]
-
-        df_reports = (
-            pd.concat([df_with_full_name, df_no_full_name], ignore_index=True)
-            .sort_values("logged_time", ascending=False)
-            .reset_index(drop=True)
-        )
-    
-
-    # Debug: usernames still missing HR resolution
+    # Keep your debug behavior
     unresolved = df_reports[df_reports["FULL_NAME"] == "Possibly Terminated"]
     if not unresolved.empty:
         print("Users unresolved after employee enrichment:")
         print(unresolved["user_name"].unique())
 
-    # Return something useful (adjust shape as needed)
-    # Convert DataFrame to dict while handling NaN values properly
-    return df_reports.fillna("").to_dict(orient="records")
+    # Return JSON-friendly payload without forcing everything to ""
+    return df_reports.replace({np.nan: None}).to_dict(orient="records")
+
+
+@router.post("/report-views")
+async def get_report_views(req: ViewedReportsRequest):
+    """
+    Returns views for a passed report (cached per report_path).
+    """
+    return await _get_report_views_cached(req.report_path)
