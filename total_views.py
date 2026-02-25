@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import pytz
 
-from aiocache import cached  # type: ignore
+from aiocache import cached # type: ignore
 from aiocache.serializers import PickleSerializer  # type: ignore
 
 from databases.psql import engine, schema
@@ -21,8 +21,8 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 CACHE_TTL_SECONDS = 86400  # 24 hours
-LOOKUP_TTL_SECONDS = 6 * 60 * 60  # 6 hours (Spotfire users + employee tables)
-REPORT_VIEWS_TTL_SECONDS = 10 * 60  # 10 minutes (per report_path)
+LOOKUP_TTL_SECONDS = 86400  # 24 hours (Spotfire users + employee tables)
+REPORT_VIEWS_TTL_SECONDS = 4 * 60 * 60   # 4 hours (per report_path)
 
 LICENSE_COLS = [
     "USER_NAME",
@@ -355,6 +355,7 @@ def enrich_with_employee_data(
       - dept_name
       - title
 
+
     Perf change: can accept preloaded/cached employee tables to avoid re-pulling Trino.
     """
     df = df_in.copy()
@@ -663,6 +664,7 @@ async def get_license_reduction(
 
     def row_to_ui(r: pd.Series) -> Dict[str, Any]:
         return {
+            # UI-visible columns
             "name": safe(r.get("FULL_NAME")),
             "statusName": safe(r.get("STATUS_NAME")),
             "user": safe(r.get("USER_NAME")),
@@ -671,6 +673,7 @@ async def get_license_reduction(
             "departmentName": safe(r.get("dept_name")),
             "title": safe(r.get("title")),
             "recommendedAction": safe(r.get("recommendedAction")),
+            # Extra fields (optional; safe to keep for later UI expansion)
             "lastActivity": safe(r.get("LAST_ACTIVITY")),
             "analystActionsPerDay": float(r.get("ANALYST_ACTIONS_PER_DAY") or 0),
             "analystFunctions": int(r.get("ANALYST_FUNCTIONS") or 0),
@@ -831,6 +834,27 @@ async def _get_report_views_cached(report_path: str) -> List[Dict[str, Any]]:
         fallback_emp=fallback_emp,
     )
 
+    
+    # --- Dedupe by FULL_NAME (keep latest logged_time) ---
+    if "FULL_NAME" in df_reports.columns:
+        has_full_name = df_reports["FULL_NAME"].notna()
+
+        # For rows with FULL_NAME: dedupe by FULL_NAME, keep latest logged_time
+        df_with_full_name = (
+            df_reports.loc[has_full_name]
+            .sort_values(["FULL_NAME", "logged_time"], ascending=[True, False])
+            .drop_duplicates(subset=["FULL_NAME"], keep="first")
+        )
+
+        # For rows without FULL_NAME: keep as-is
+        df_no_full_name = df_reports.loc[~has_full_name]
+
+        df_reports = (
+            pd.concat([df_with_full_name, df_no_full_name], ignore_index=True)
+            .sort_values("logged_time", ascending=False)
+            .reset_index(drop=True)
+        )
+    
     # Keep your debug behavior
     unresolved = df_reports[df_reports["FULL_NAME"] == "Possibly Terminated"]
     if not unresolved.empty:
