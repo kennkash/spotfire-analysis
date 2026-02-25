@@ -734,7 +734,7 @@ async def _get_report_views_cached(report_path: str) -> List[Dict[str, Any]]:
       - caches report views per report_path for REPORT_VIEWS_TTL_SECONDS
       - avoids DataFrame merge for sf_users: uses dict mapping (fast for small result sets)
       - parses logged_time once
-      - single dedupe strategy (email preferred, fallback to user_name)
+      - double dedupe strategy (email preferred, fallback to FULL_NAME)
       - avoids df.fillna("") (expensive, and forces string conversions)
     """
     cutoff_dt = datetime.utcnow() - timedelta(days=30)
