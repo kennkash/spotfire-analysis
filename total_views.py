@@ -1,3 +1,15 @@
+def _report_views_cache_key(func, *args, **kwargs) -> str:
+    report_path = (args[0] if len(args) > 0 else kwargs.get("report_path", "")).strip()
+
+    # days might be positional arg 1, or kwarg "days"
+    days = args[1] if len(args) > 1 else kwargs.get("days", 30)
+    try:
+        days_int = int(days)
+    except Exception:
+        days_int = 30
+
+    return f"report_views:{report_path}:days={days_int}"
+
 [
   {
     "logged_time": "2026-02-25T15:33:50+00:00",
