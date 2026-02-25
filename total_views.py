@@ -1,105 +1,200 @@
-def _collapse_keep_latest_with_counts(
-    df: pd.DataFrame,
-    key_col: str,
-    time_col: str,
-    count_col: str = "view_count",
-    extra_count_cols: Optional[Dict[str, str]] = None,  # e.g. {"session_id": "unique_sessions"}
-) -> pd.DataFrame:
-    """
-    Collapse rows by key_col:
-      - keep the row with the max time_col as the representative
-      - add count_col = total rows in the group
-      - optionally add extra aggregate counts (e.g., nunique session_id)
-
-    Returns: representative rows with aggregates attached.
-    """
-    if df is None or df.empty:
-        return df
-
-    d = df.copy()
-
-    # Drop rows with missing key
-    d = d.dropna(subset=[key_col])
-    if d.empty:
-        return d
-
-    # Ensure datetime
-    d[time_col] = pd.to_datetime(d[time_col], errors="coerce", utc=True)
-    d = d.dropna(subset=[time_col])
-    if d.empty:
-        return d
-
-    # Aggregations
-    grp = d.groupby(key_col, dropna=False)
-    counts = grp.size().rename(count_col)
-
-    # Representative row index = idx of latest timestamp per key
-    idx = grp[time_col].idxmax()
-    rep = d.loc[idx].copy()
-
-    rep[count_col] = rep[key_col].map(counts)
-
-    if extra_count_cols:
-        for col, out_name in extra_count_cols.items():
-            if col in d.columns:
-                rep[out_name] = rep[key_col].map(grp[col].nunique().rename(out_name))
-
-    # Helpful explicit "last_logged" field (same as rep[time_col])
-    rep["last_logged"] = rep[time_col]
-
-    # Sort newest first
-    rep = rep.sort_values(time_col, ascending=False).reset_index(drop=True)
-    return rep
-
-# Identity key: prefer email, fallback user_name
-df_reports["_identity_key"] = df_reports["email"].fillna(df_reports["user_name"])
-
-# Collapse to ONE row per identity, but KEEP total views as view_count
-# (and optionally unique sessions)
-df_reports = _collapse_keep_latest_with_counts(
-    df=df_reports,
-    key_col="_identity_key",
-    time_col="logged_time",
-    count_col="view_count",
-    extra_count_cols={"session_id": "unique_sessions"} if "session_id" in df_reports.columns else None,
-)
-
-# Cleanup key column if you don't want to expose it
-df_reports.drop(columns=["_identity_key"], inplace=True, errors="ignore")
-
-
-
-
-# --- Dedupe by FULL_NAME (keep latest logged_time), but SUM view_count ---
-if "FULL_NAME" in df_reports.columns:
-    # Don't collapse unresolved users into one mega-row
-    good_name = df_reports["FULL_NAME"].notna() & (df_reports["FULL_NAME"] != "Possibly Terminated")
-
-    df_good = df_reports.loc[good_name].copy()
-    df_bad = df_reports.loc[~good_name].copy()
-
-    if not df_good.empty:
-        # If view_count isn't present for some reason, default it
-        if "view_count" not in df_good.columns:
-            df_good["view_count"] = 1
-
-        # Collapse by FULL_NAME: keep latest row, sum view_count (and unique_sessions if present)
-        key = "FULL_NAME"
-        grp = df_good.groupby(key, dropna=False)
-
-        # representative rows (latest)
-        idx = grp["logged_time"].idxmax()
-        rep = df_good.loc[idx].copy()
-
-        # sum counts
-        rep["view_count"] = rep[key].map(grp["view_count"].sum())
-
-        if "unique_sessions" in df_good.columns:
-            # Note: summing nunique-per-identity can overcount if sessions overlap across identities.
-            # If you truly need exact unique sessions per FULL_NAME, we can compute it with a set-based agg.
-            rep["unique_sessions"] = rep[key].map(grp["unique_sessions"].sum())
-
-        rep["last_logged"] = rep["logged_time"]
-        df_reports = pd.concat([rep, df_bad], ignore_index=True).sort_values("logged_time", ascending=False).reset_index(drop=True)
-    else:
-        df_reports = df_bad.sort_values("logged_time", ascending=False).reset_index(drop=True)
+[
+  {
+    "logged_time": "2026-02-25T15:33:50+00:00",
+    "user_name": "andrew.ji",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "2c05ce34-734c-44eb-bb25-e493c67af0ff",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "andrew.ji@samsung.com",
+    "display_name": "Andrew Seungmin Ji",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Engineer I",
+    "nt_id": "aji5419",
+    "bname": null,
+    "gad_id": "andrew.ji",
+    "FULL_NAME": "Andrew Ji",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-25T11:08:04+00:00",
+    "user_name": "o.imasua",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "cd1b8c24-9385-4fa0-9fc3-fde07528f3e6",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "o.imasua@partner.samsung.com",
+    "display_name": "oimasua9117",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Technician II",
+    "nt_id": null,
+    "bname": null,
+    "gad_id": null,
+    "FULL_NAME": "Oziomachukwu Imasua",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-25T10:43:01+00:00",
+    "user_name": "laura.galvan",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "5b16eeac-ba9e-490a-8c36-0cb1a3611571",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "laura.galvan@samsung.com",
+    "display_name": "Laura D Galvan",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Senior Technician",
+    "nt_id": "lgalvan",
+    "bname": "lgalvan",
+    "gad_id": "laura.galvan",
+    "FULL_NAME": "Laura D Galvan",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-25T09:46:42+00:00",
+    "user_name": "t.valenzuela",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "532de82b-006d-48e7-96c1-759b4db0c63d",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "t.valenzuela@samsung.com",
+    "display_name": "Tammie Valenzuela",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Senior Technician",
+    "nt_id": "tvalenzuela",
+    "bname": "tvalenzuela",
+    "gad_id": "t.valenzuela",
+    "FULL_NAME": "Tammie Perkins",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-25T09:35:15+00:00",
+    "user_name": "b.patschke",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "392314fc-83eb-4470-855d-8ef2e5d3978a",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "b.patschke@samsung.com",
+    "display_name": "Brandon Patschke",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Senior Technician",
+    "nt_id": "bpatschke",
+    "bname": "bpatschke",
+    "gad_id": "b.patschke",
+    "FULL_NAME": "Brandon L Patschke",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-25T07:23:02+00:00",
+    "user_name": "s.wilson",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "28d6922b-0efe-4aab-867e-7bfb0c935d28",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "s.wilson@samsung.com",
+    "display_name": "Shawn E Wilson",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Senior Technician",
+    "nt_id": "swilson",
+    "bname": "swilson",
+    "gad_id": "s.wilson",
+    "FULL_NAME": "Shawn E Wilson",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-25T04:59:15+00:00",
+    "user_name": "m.srey",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "13bd1681-de50-40cc-8bfe-0fc1fbe5ab6b",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "m.srey@samsung.com",
+    "display_name": "Maline Srey",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Senior Technician",
+    "nt_id": "msrey",
+    "bname": "msrey",
+    "gad_id": "m.srey",
+    "FULL_NAME": "Maline Srey",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-25T04:54:15+00:00",
+    "user_name": "d.imhanria",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "5079ad00-011e-4576-80d6-8b72475e45b3",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "d.imhanria@partner.samsung.com",
+    "display_name": "David Imhanria",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Technician II",
+    "nt_id": null,
+    "bname": null,
+    "gad_id": null,
+    "FULL_NAME": "David Imhanria",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-20T09:17:39+00:00",
+    "user_name": "h.hannan",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "2025e7fe-6450-416c-9f1f-88a3cec47359",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "h.hannan@samsung.com",
+    "display_name": "Heather Lindsey Hannan",
+    "dept_name": "Digital Solutions - Data Science",
+    "cost_center_name": "Digital Solutions",
+    "title": "Engineer II",
+    "nt_id": "hhannan4026",
+    "bname": null,
+    "gad_id": "h.hannan",
+    "FULL_NAME": "Heather Hannan Samra",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-14T09:39:52+00:00",
+    "user_name": "mp.rodriguez",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "e806d512-9cce-4744-8046-102a5b853a13",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "mp.rodriguez@samsung.com",
+    "display_name": "Michael Pete Rodriguez",
+    "dept_name": "Signal One - PCM",
+    "cost_center_name": "Signal One",
+    "title": "Master Technician",
+    "nt_id": "mrodriguez1",
+    "bname": "mrodriguez1",
+    "gad_id": "mp.rodriguez",
+    "FULL_NAME": "Michael Pete Rodriguez",
+    "STATUS_NAME": "Active"
+  },
+  {
+    "logged_time": "2026-02-05T17:15:02+00:00",
+    "user_name": "dmoody",
+    "log_category": "library",
+    "log_action": "load_content",
+    "session_id": "3ed3976a-dcab-4cbe-81b7-3a82dcfd8b3f",
+    "id2": "/31_S.LSI/03 Report/YA Team/PCM Team/PCM_Inline_All_WECO",
+    "email": "d.moody@samsung.com",
+    "display_name": null,
+    "dept_name": "Digital Solutions",
+    "cost_center_name": "Digital Solutions",
+    "title": "Staff Engineer I TR",
+    "nt_id": "dmoody",
+    "bname": "dmoody",
+    "gad_id": "d.moody",
+    "FULL_NAME": "Daniel Drummond Moody",
+    "STATUS_NAME": "Active"
+  }
+]
