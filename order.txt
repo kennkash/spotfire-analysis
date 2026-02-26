@@ -1,0 +1,24 @@
+Full Name
+Username
+Email
+Cost Center
+Department
+Title
+Views
+Last Viewed
+▲
+Daniel Drummond Moody	dmoody	d.moody@samsung.com	Digital Solutions	Digital Solutions	Staff Engineer I TR	2	02/05/2026 05:15:02 PM
+Michael Pete Rodriguez	mp.rodriguez	mp.rodriguez@samsung.com	Signal One	Signal One - PCM	Master Technician	6	02/14/2026 09:39:52 AM
+Heather Hannan Samra	h.hannan	h.hannan@samsung.com	Digital Solutions	Digital Solutions - Data Science	Engineer II	1	02/20/2026 09:17:39 AM
+David Imhanria	d.imhanria	d.imhanria@partner.samsung.com	Signal One	Signal One - PCM	Technician II	53	02/25/2026 04:54:15 AM
+Maline Srey	m.srey	m.srey@samsung.com	Signal One	Signal One - PCM	Senior Technician	49	02/25/2026 04:59:15 AM
+Shawn E Wilson	s.wilson	s.wilson@samsung.com	Signal One	Signal One - PCM	Senior Technician	69	02/25/2026 07:23:02 AM
+Brandon L Patschke	b.patschke	b.patschke@samsung.com	Signal One	Signal One - PCM	Senior Technician	50	02/25/2026 09:35:15 AM
+Tammie Perkins	t.valenzuela	t.valenzuela@samsung.com	Signal One	Signal One - PCM	Senior Technician	32	02/25/2026 09:46:42 AM
+Laura D Galvan	laura.galvan	laura.galvan@samsung.com	Signal One	Signal One - PCM	Senior Technician	35	02/25/2026 10:43:01 AM
+Oziomachukwu Imasua	o.imasua	o.imasua@partner.samsung.com	Signal One	Signal One - PCM	Technician II	43	02/25/2026 11:08:04 AM
+Andrew Ji	andrew.ji	andrew.ji@samsung.com	Signal One	Signal One - PCM	Engineer I	1	02/25/2026 03:33:50 PM
+
+
+
+this is when sorting is asc 
