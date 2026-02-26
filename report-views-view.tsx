@@ -98,13 +98,48 @@ function formatDateTime(value: any) {
     return `${month}/${day}/${year} ${pad(displayHours)}:${minutes}:${seconds} ${ampm}`;
 }
 
-function toEpochMs(value: any): number {
-    if (!value) return Number.NEGATIVE_INFINITY // keep empty values at bottom/top depending on dir handling
-    const d = typeof value === "string" ? new Date(value) : new Date(value)
-    const t = d.getTime()
-    return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t
-}
+function toEpochMs(value: any): number | null {
+  if (value === null || value === undefined || value === "") return null
 
+  // If backend ever sends numeric epoch (seconds or ms)
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // heuristic: seconds vs ms
+    return value < 1e12 ? value * 1000 : value
+  }
+
+  const s = String(value).trim()
+  if (!s) return null
+
+  // ISO-8601 (best case): 2026-02-25T18:12:33Z or with offset
+  if (s.includes("T")) {
+    const t = new Date(s).getTime()
+    return Number.isNaN(t) ? null : t
+  }
+
+  // "MM/DD/YYYY hh:mm:ss AM/PM" (what your formatter outputs)
+  const m = s.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)$/i
+  )
+  if (m) {
+    const mm = Number(m[1])
+    const dd = Number(m[2])
+    const yyyy = Number(m[3])
+    let hh = Number(m[4])
+    const min = Number(m[5])
+    const sec = Number(m[6])
+    const ampm = m[7].toUpperCase()
+
+    if (ampm === "PM" && hh !== 12) hh += 12
+    if (ampm === "AM" && hh === 12) hh = 0
+
+    // Your display uses UTC pieces, so sort as UTC to match what users see
+    return Date.UTC(yyyy, mm - 1, dd, hh, min, sec)
+  }
+
+  // Last attempt (may work for some browser-locale formats)
+  const t = new Date(s).getTime()
+  return Number.isNaN(t) ? null : t
+}
 
 
 
@@ -174,9 +209,18 @@ export default function ReportViewsView() {
             }
 
             if (sortKey === "logged_time") {
-                const tA = toEpochMs(a?.[sortKey])
-                const tB = toEpochMs(b?.[sortKey])
-                return (tA - tB) * dir
+              const tA = toEpochMs(a?.[sortKey])
+              const tB = toEpochMs(b?.[sortKey])
+            
+              const aValid = typeof tA === "number"
+              const bValid = typeof tB === "number"
+            
+              // Always push invalid/missing to the bottom (both asc + desc)
+              if (!aValid && !bValid) return 0
+              if (!aValid) return 1
+              if (!bValid) return -1
+            
+              return (tA - tB) * dir
             }
 
             const av = normalize(a?.[sortKey])
