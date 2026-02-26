@@ -1,57 +1,3 @@
-const hasSubmitted = !!submittedPath
-const buttonLabel = hasSubmitted ? "Refetch" : "Fetch"
-
-const onFetchOrRefetch = async () => {
-  // If we've already loaded a report, just refetch the current query
-  if (hasSubmitted) {
-    await refetch()
-    return
-  }
-
-  // Otherwise do the initial fetch
-  onSubmit()
-}
-
-
-<Button
-  onClick={onFetchOrRefetch}
-  disabled={
-    (hasSubmitted ? false : !reportPath.trim()) || isLoading || isFetching
-  }
-  className="hover:cursor-pointer"
->
-  {buttonLabel}
-</Button>
-
-
-const onSubmit = () => {
-  const v = reportPath.trim()
-  if (!v) return
-  setSubmittedPath(v)
-  setReportPath(v) // optional
-}
-
-
-
-
-const filterKeys = React.useMemo(
-  () => columnConfig.map(c => c.key),
-  [columnConfig]
-)
-
-const filteredRows = React.useMemo(() => {
-  const q = normalize(search).toLowerCase()
-  if (!q) return rows
-
-  return rows.filter((r) =>
-    filterKeys.some((k) => normalize(r?.[k]).toLowerCase().includes(q))
-  )
-}, [rows, search, filterKeys])
-
-
-Why when I try to filter for "IT Services" using the text input filter box, does it not filter down? I can see rows where department = IT Services
-
-
 // spotfire-license-hub/src/components/report-views/report-views-view.tsx
 
 "use client"
@@ -64,15 +10,23 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Info} from "lucide-react"
-
+import { Info } from "lucide-react"
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue
+} from "@/components/ui/select"
 
 import { getApiBase } from "@/lib/apiBase"
 
-type JsonRow = Record<string, any>
+type JsonRow = Record<string, any> & {
+    view_count?: number
+}
 type SortDir = "asc" | "desc"
 
-async function fetchReportViews(reportPath: string): Promise<JsonRow[]> {
+async function fetchReportViews(reportPath: string, days: string = "30"): Promise<JsonRow[]> {
     const base = getApiBase()
 
     const res = await fetch(`${base}/v0/report-views`, {
@@ -82,7 +36,10 @@ async function fetchReportViews(reportPath: string): Promise<JsonRow[]> {
             "Content-Type": "application/json",
             "Cache-Control": "no-store",
         },
-        body: JSON.stringify({ report_path: reportPath }),
+        body: JSON.stringify({
+            report_path: reportPath,
+            days: parseInt(days)
+        }),
     })
 
     if (!res.ok) {
@@ -147,27 +104,22 @@ export default function ReportViewsView() {
     const [search, setSearch] = React.useState("")
     const [sortKey, setSortKey] = React.useState<string | null>(null)
     const [sortDir, setSortDir] = React.useState<SortDir>("asc")
+    const [timeRange, setTimeRange] = React.useState("30")
 
     const {
         data: rows = [],
         isLoading,
         isFetching,
-        error
+        error,
+        refetch
     } = useQuery({
-        queryKey: ["report-views", submittedPath],
-        queryFn: () => fetchReportViews(submittedPath),
+        queryKey: ["report-views", submittedPath, timeRange],
+        queryFn: () => fetchReportViews(submittedPath, timeRange),
         enabled: !!submittedPath,
         refetchOnWindowFocus: false,
         staleTime: 0,
         retry: 1,
     })
-
-    // Collect all keys across all rows (so we "include all keys in the JSON")
-    const allKeys = React.useMemo(() => {
-        const s = new Set<string>()
-        for (const r of rows) Object.keys(r || {}).forEach((k) => s.add(k))
-        return Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-    }, [rows])
 
     const columnConfig: { key: string; label: string }[] = [
         { key: "FULL_NAME", label: "Full Name" },
@@ -176,7 +128,7 @@ export default function ReportViewsView() {
         { key: "cost_center_name", label: "Cost Center" },
         { key: "dept_name", label: "Department" },
         { key: "title", label: "Title" },
-        { key: "STATUS_NAME", label: "Employee Status" },
+        { key: "view_count", label: "Views" },
         { key: "logged_time", label: "Last Viewed" },
     ]
 
@@ -187,32 +139,68 @@ export default function ReportViewsView() {
         setSortDir("asc")
     }, [submittedPath])
 
+    // Add a useEffect to refetch when time range changes
+    React.useEffect(() => {
+        if (submittedPath) {
+            refetch()
+        }
+    }, [timeRange, submittedPath, refetch])
+
+    const filterKeys = React.useMemo(
+        () => columnConfig.map(c => c.key),
+        [columnConfig]
+    )
+
     const filteredRows = React.useMemo(() => {
-        const q = search.trim().toLowerCase()
+        const q = normalize(search).toLowerCase()
         if (!q) return rows
 
         return rows.filter((r) =>
-            allKeys.some((k) => normalize(r?.[k]).toLowerCase().includes(q))
+            filterKeys.some((k) => normalize(r?.[k]).toLowerCase().includes(q))
         )
-    }, [rows, search, allKeys])
+    }, [rows, search, filterKeys])
 
     const finalRows = React.useMemo(() => {
         if (!sortKey) return filteredRows
         const dir = sortDir === "asc" ? 1 : -1
 
         const compare = (a: JsonRow, b: JsonRow) => {
+            if (sortKey === "view_count") {
+                // Handle view_count as a number
+                const countA = Number(a?.[sortKey] || 0)
+                const countB = Number(b?.[sortKey] || 0)
+                return (countA - countB) * dir
+            }
+
+            // Handle other columns as strings
             const av = normalize(a?.[sortKey])
             const bv = normalize(b?.[sortKey])
             return av.localeCompare(bv, undefined, { sensitivity: "base" }) * dir
         }
 
-        return filteredRows.slice().sort(compare)
+        return [...filteredRows].sort(compare)
     }, [filteredRows, sortKey, sortDir])
 
     const onSubmit = () => {
         const v = reportPath.trim()
         if (!v) return
         setSubmittedPath(v)
+        setReportPath(v)
+        setTimeRange("30")
+    }
+
+    const hasSubmitted = !!submittedPath
+    const buttonLabel = hasSubmitted ? "Refetch" : "Fetch"
+
+    const onFetchOrRefetch = async () => {
+        // If we've already loaded a report, just refetch the current query
+        if (hasSubmitted) {
+            await refetch()
+            return
+        }
+
+        // Otherwise do the initial fetch
+        onSubmit()
     }
 
     const onSort = (key: string) => {
@@ -232,6 +220,13 @@ export default function ReportViewsView() {
     )
 
     const totalUniqueViewers = rows.length
+    const totalViews = React.useMemo(() => {
+        return rows.reduce((sum, row) => {
+            // Ensure view_count exists and is a valid number
+            const count = Number(row?.view_count || 0)
+            return sum + count
+        }, 0)
+    }, [rows])
 
     const reportNotFound = submittedPath && !isLoading && !isFetching && rows.length === 0
 
@@ -295,11 +290,10 @@ export default function ReportViewsView() {
                     <div className="space-y-2 text-sm text-muted-foreground mt-2 mb-4">
                         <p className="font-medium">Data includes:</p>
                         <ul className="space-y-2 list-disc pl-5">
-                            <li>Displays report views from the past <strong>30 days</strong></li>
+                            <li>Report views from the past <strong>{timeRange} days</strong></li>
                             <li>
-                                Shows one entry per user (<i>unique</i> viewers only)
+                                One entry per user, displaying their <u>total view count</u> & <u>most recent view</u> of the report
                             </li>
-                            <li>Extracts each user's most recent view of the report</li>
                         </ul>
                     </div>
 
@@ -316,8 +310,24 @@ export default function ReportViewsView() {
                                 }}
                                 disabled={isLoading || isFetching}
                             />
-                            <Button onClick={onSubmit} disabled={!reportPath.trim() || isLoading || isFetching} className="hover:cursor-pointer">
-                                Fetch
+                            <Select value={timeRange} onValueChange={setTimeRange}>
+                                <SelectTrigger className="w-[140px]">
+                                    <SelectValue placeholder="Time range" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="30">Last 30 Days</SelectItem>
+                                    <SelectItem value="60">Last 60 Days</SelectItem>
+                                    <SelectItem value="90">Last 90 Days</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <Button
+                                onClick={onFetchOrRefetch}
+                                disabled={
+                                    (hasSubmitted ? false : !reportPath.trim()) || isLoading || isFetching
+                                }
+                                className="hover:cursor-pointer"
+                            >
+                                {buttonLabel}
                             </Button>
                         </div>
 
@@ -371,9 +381,28 @@ export default function ReportViewsView() {
                         <div className="mt-4 p-3 bg-background rounded border">
                             <div className="font-medium mb-2">Summary</div>
 
-                            <div className="flex items-center justify-between text-sm">
-                                <span>Total unique viewers</span>
-                                <span className="bg-green-100 dark:bg-green-900/20 px-2 py-1 rounded text-green-800 dark:text-green-200 font-medium">{totalUniqueViewers}</span>
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-green-500">Total Views</span>
+                                    </div>
+                                    <div className="flex items-center gap-4 text-sm">
+                                        <span className="bg-green-100 dark:bg-green-900/20 px-2 py-1 rounded text-green-800 dark:text-green-200 font-medium">
+                                            {totalViews}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-blue-500">Unique Viewers</span>
+                                    </div>
+                                    <div className="flex items-center gap-4 text-sm">
+                                        <span className="bg-blue-100 dark:bg-blue-900/20 px-2 py-1 rounded text-blue-800 dark:text-blue-200 font-medium">
+                                            {totalUniqueViewers}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -395,8 +424,8 @@ export default function ReportViewsView() {
                             <Button
                                 variant="outline"
                                 onClick={() => {
-                                setReportPath("");
-                                setSubmittedPath("");
+                                    setReportPath("");
+                                    setSubmittedPath("");
                                 }}
                                 className="mt-4"
                             >
@@ -404,50 +433,50 @@ export default function ReportViewsView() {
                             </Button>
                         </div>
                     ) : (
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        {columnConfig.map((col) => (
-                                            <TableHead key={col.key}>
-                                                <Button
-                                                    variant="ghost"
-                                                    className="px-0 h-auto font-medium"
-                                                    onClick={() => onSort(col.key)}
-                                                >
-                                                    {col.label}
-                                                    <span className="ml-2 text-muted-foreground">
-                                                        {sortIcon(sortKey === col.key, sortDir)}
-                                                    </span>
-                                                </Button>
-                                            </TableHead>
-                                        ))}
-                                    </TableRow>
-                                </TableHeader>
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    {columnConfig.map((col) => (
+                                        <TableHead key={col.key}>
+                                            <Button
+                                                variant="ghost"
+                                                className="px-0 h-auto font-medium"
+                                                onClick={() => onSort(col.key)}
+                                            >
+                                                {col.label}
+                                                <span className="ml-2 text-muted-foreground">
+                                                    {sortIcon(sortKey === col.key, sortDir)}
+                                                </span>
+                                            </Button>
+                                        </TableHead>
+                                    ))}
+                                </TableRow>
+                            </TableHeader>
 
-                                <TableBody>
-                                    {finalRows.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={columnConfig.length} className="text-center py-6">
-                                                No matching results
-                                            </TableCell>
+                            <TableBody>
+                                {finalRows.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={columnConfig.length} className="text-center py-6">
+                                            No matching results
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    finalRows.map((r, idx) => (
+                                        <TableRow key={idx}>
+                                            {columnConfig.map((col) => (
+                                                <TableCell key={col.key}>
+                                                    {col.key === "logged_time"
+                                                        ? formatDateTime(r?.[col.key])
+                                                        : normalize(r?.[col.key])}
+                                                </TableCell>
+                                            ))}
                                         </TableRow>
-                                    ) : (
-                                        finalRows.map((r, idx) => (
-                                            <TableRow key={idx}>
-                                                {columnConfig.map((col) => (
-                                                    <TableCell key={col.key}>
-                                                        {col.key === "logged_time"
-                                                            ? formatDateTime(r?.[col.key])
-                                                            : normalize(r?.[col.key])}
-                                                    </TableCell>
-                                                ))}
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
                     )}
-                        </CardContent>
+                </CardContent>
             </Card>
         </div>
     )
