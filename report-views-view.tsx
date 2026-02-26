@@ -1,3 +1,34 @@
+const searchRef = React.useRef<HTMLInputElement | null>(null)
+
+<div className="relative sm:w-[340px]">
+  <Input
+    ref={searchRef}
+    value={search}
+    onChange={(e) => setSearch(e.target.value)}
+    placeholder="Filter any column…"
+    className="pr-8"
+    disabled={!submittedPath || isBusy}
+  />
+
+  {!!search.trim() && (
+    <button
+      type="button"
+      onClick={() => {
+        setSearch("")
+        // Focus AFTER React applies the state update
+        requestAnimationFrame(() => searchRef.current?.focus())
+      }}
+      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+      aria-label="Clear search"
+      title="Clear"
+    >
+      ✕
+    </button>
+  )}
+</div>
+
+
+
 // spotfire-license-hub/src/components/report-views/report-views-view.tsx
 
 "use client"
