@@ -1,3 +1,135 @@
+def _dedupe_license_users_by_email_prefer_analyst(df_in: pd.DataFrame) -> pd.DataFrame:
+    """
+    De-dupe duplicate Spotfire accounts that represent the same person.
+
+    Identity grouping:
+    - If USER_EMAIL exists: group by email local-part (text before '@') LOWERCASED.
+      This makes these group together:
+        john.doe@samsung.com
+        john.doe@partner.samsung.com
+    - If USER_EMAIL missing/blank: do not de-dupe those rows.
+
+    Winner selection per identity:
+    - If ANY row in the group has recommendedAction == "Analyst", keep an Analyst row.
+    - Else keep the row with the most recent LAST_ACTIVITY.
+    - Tie-breakers: LAST_ACTIVITY desc -> ANALYST_ACTIONS_PER_DAY desc -> USER_NAME asc
+
+    Canonical email output:
+    - After selecting the winning row, force USER_EMAIL to be the @samsung.com email
+      for that identity if we can construct/detect it.
+      * If the group contains an @samsung.com email, use that exact value.
+      * Else, construct f"{localpart}@samsung.com".
+    """
+    if df_in is None or df_in.empty:
+        return df_in
+
+    df = df_in.copy()
+
+    if "USER_EMAIL" not in df.columns:
+        return df
+
+    # Normalize email
+    df["USER_EMAIL"] = (
+        df["USER_EMAIL"]
+        .where(df["USER_EMAIL"].notna(), None)
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace({"nan": None, "": None})
+    )
+
+    has_email = df["USER_EMAIL"].notna() & (df["USER_EMAIL"].astype(str).str.strip() != "")
+    if not has_email.any():
+        return df
+
+    # Ensure fields exist
+    if "recommendedAction" not in df.columns:
+        df["recommendedAction"] = None
+    if "ANALYST_ACTIONS_PER_DAY" in df.columns:
+        df["ANALYST_ACTIONS_PER_DAY"] = pd.to_numeric(df["ANALYST_ACTIONS_PER_DAY"], errors="coerce").fillna(0)
+    else:
+        df["ANALYST_ACTIONS_PER_DAY"] = 0
+
+    # Parse LAST_ACTIVITY for ordering
+    if "LAST_ACTIVITY" in df.columns:
+        df["_LAST_ACTIVITY_DT"] = pd.to_datetime(df["LAST_ACTIVITY"], errors="coerce", utc=True)
+    else:
+        df["_LAST_ACTIVITY_DT"] = pd.NaT
+
+    # recommendedAction flag
+    ra = df["recommendedAction"].astype(str).str.strip().str.lower()
+    df["_IS_ANALYST"] = (ra == "analyst").astype(int)
+
+    # Build identity key from email local-part (before @)
+    # - This groups samsung + partner accounts together
+    df["_EMAIL_LOCALPART"] = df["USER_EMAIL"].apply(_email_localpart)
+    df["_EMAIL_LOCALPART"] = (
+        df["_EMAIL_LOCALPART"]
+        .where(df["_EMAIL_LOCALPART"].notna(), None)
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace({"nan": None, "": None})
+    )
+
+    # Safety: if localpart couldn't be derived, treat as no-email (don't dedupe)
+    has_localpart = has_email & df["_EMAIL_LOCALPART"].notna() & (df["_EMAIL_LOCALPART"].astype(str).str.strip() != "")
+
+    # Winner sort order
+    if "USER_NAME" not in df.columns:
+        df["USER_NAME"] = None
+
+    df_sorted = df.sort_values(
+        by=["_IS_ANALYST", "_LAST_ACTIVITY_DT", "ANALYST_ACTIONS_PER_DAY", "USER_NAME"],
+        ascending=[False, False, False, True],
+        na_position="last",
+    )
+
+    # Keep one per identity key
+    kept_ident = df_sorted.loc[has_localpart].drop_duplicates(subset=["_EMAIL_LOCALPART"], keep="first").copy()
+
+    # Force canonical email: prefer an actual @samsung.com seen in the group; else construct localpart@samsung.com
+    # Build a map from localpart -> samsung email (if present)
+    pool = df_sorted.loc[has_localpart, ["_EMAIL_LOCALPART", "USER_EMAIL"]].copy()
+    pool["IS_SAMSUNG"] = pool["USER_EMAIL"].astype(str).str.endswith("@samsung.com")
+    pool_samsung = pool.loc[pool["IS_SAMSUNG"]].dropna(subset=["_EMAIL_LOCALPART", "USER_EMAIL"]).copy()
+
+    local_to_samsung = {}
+    if not pool_samsung.empty:
+        # If multiple @samsung.com variants somehow exist, take the first one (they should be identical)
+        local_to_samsung = (
+            pool_samsung.drop_duplicates(subset=["_EMAIL_LOCALPART"])
+            .set_index("_EMAIL_LOCALPART")["USER_EMAIL"]
+            .to_dict()
+        )
+
+    def canonical_email(localpart: Optional[str]) -> Optional[str]:
+        if not localpart:
+            return None
+        lp = str(localpart).strip().lower()
+        if not lp:
+            return None
+        # Prefer known @samsung.com in the group
+        if lp in local_to_samsung:
+            return local_to_samsung[lp]
+        # Otherwise construct
+        return f"{lp}@samsung.com"
+
+    kept_ident["USER_EMAIL"] = kept_ident["_EMAIL_LOCALPART"].apply(canonical_email)
+
+    # Keep all rows that we did NOT dedupe:
+    # - missing/blank email
+    # - missing localpart (should be rare)
+    kept_other = df_sorted.loc[~has_localpart].copy()
+
+    out = pd.concat([kept_ident, kept_other], ignore_index=True)
+
+    # Cleanup helper cols
+    out.drop(columns=["_LAST_ACTIVITY_DT", "_IS_ANALYST", "_EMAIL_LOCALPART"], inplace=True, errors="ignore")
+
+    return out
+
+
 from fastapi import APIRouter, Query, HTTPException
 from typing import List, Dict, Any, Optional
 import pandas as pd
