@@ -1,3 +1,31 @@
+function toEpochMs(value: any): number {
+  if (!value) return Number.NEGATIVE_INFINITY // keep empty values at bottom/top depending on dir handling
+  const d = typeof value === "string" ? new Date(value) : new Date(value)
+  const t = d.getTime()
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t
+}
+
+
+const compare = (a: JsonRow, b: JsonRow) => {
+  if (sortKey === "view_count") {
+    const countA = Number(a?.[sortKey] || 0)
+    const countB = Number(b?.[sortKey] || 0)
+    return (countA - countB) * dir
+  }
+
+  if (sortKey === "logged_time") {
+    const tA = toEpochMs(a?.[sortKey])
+    const tB = toEpochMs(b?.[sortKey])
+    return (tA - tB) * dir
+  }
+
+  const av = normalize(a?.[sortKey])
+  const bv = normalize(b?.[sortKey])
+  return av.localeCompare(bv, undefined, { sensitivity: "base" }) * dir
+}
+
+
+
 const searchRef = React.useRef<HTMLInputElement | null>(null)
 
 <div className="relative sm:w-[340px]">
