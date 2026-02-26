@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import pytz
 
-from aiocache import cached # type: ignore
+from aiocache import cached  # type: ignore
 from aiocache.serializers import PickleSerializer  # type: ignore
 
 from databases.psql import engine, schema
@@ -22,7 +22,7 @@ router = APIRouter()
 
 CACHE_TTL_SECONDS = 86400  # 24 hours
 LOOKUP_TTL_SECONDS = 86400  # 24 hours (Spotfire users + employee tables)
-REPORT_VIEWS_TTL_SECONDS = 4 * 60 * 60   # 4 hours (per report_path)
+REPORT_VIEWS_TTL_SECONDS = 4 * 60 * 60  # 4 hours (per report_path)
 
 LICENSE_COLS = [
     "USER_NAME",
@@ -159,21 +159,15 @@ def _fill_missing_from_key(
     dept_map = lk.set_index(lookup_key)["dept_name"].to_dict()
     title_map = lk.set_index(lookup_key)["title"].to_dict()
 
-    merged.loc[missing_mask, "FULL_NAME"] = merged.loc[missing_mask, "FULL_NAME"].fillna(
-        left_keys_norm.map(name_map)
-    )
+    merged.loc[missing_mask, "FULL_NAME"] = merged.loc[missing_mask, "FULL_NAME"].fillna(left_keys_norm.map(name_map))
     merged.loc[missing_mask, "STATUS_NAME"] = merged.loc[missing_mask, "STATUS_NAME"].fillna(
         left_keys_norm.map(status_map)
     )
     merged.loc[missing_mask, "cost_center_name"] = merged.loc[missing_mask, "cost_center_name"].fillna(
         left_keys_norm.map(cc_map)
     )
-    merged.loc[missing_mask, "dept_name"] = merged.loc[missing_mask, "dept_name"].fillna(
-        left_keys_norm.map(dept_map)
-    )
-    merged.loc[missing_mask, "title"] = merged.loc[missing_mask, "title"].fillna(
-        left_keys_norm.map(title_map)
-    )
+    merged.loc[missing_mask, "dept_name"] = merged.loc[missing_mask, "dept_name"].fillna(left_keys_norm.map(dept_map))
+    merged.loc[missing_mask, "title"] = merged.loc[missing_mask, "title"].fillna(left_keys_norm.map(title_map))
 
     return merged
 
@@ -216,24 +210,15 @@ def _fill_missing_email_from_employee_ids(
 
     if "bname" in emp.columns:
         maps.append(
-            emp.dropna(subset=["bname", "smtp"])
-            .drop_duplicates("bname")
-            .set_index("bname")["smtp"]
-            .to_dict()
+            emp.dropna(subset=["bname", "smtp"]).drop_duplicates("bname").set_index("bname")["smtp"].to_dict()
         )
     if "nt_id" in emp.columns:
         maps.append(
-            emp.dropna(subset=["nt_id", "smtp"])
-            .drop_duplicates("nt_id")
-            .set_index("nt_id")["smtp"]
-            .to_dict()
+            emp.dropna(subset=["nt_id", "smtp"]).drop_duplicates("nt_id").set_index("nt_id")["smtp"].to_dict()
         )
     if "gad_id" in emp.columns:
         maps.append(
-            emp.dropna(subset=["gad_id", "smtp"])
-            .drop_duplicates("gad_id")
-            .set_index("gad_id")["smtp"]
-            .to_dict()
+            emp.dropna(subset=["gad_id", "smtp"]).drop_duplicates("gad_id").set_index("gad_id")["smtp"].to_dict()
         )
 
     found = pd.Series(index=left.index, dtype="object")
@@ -284,11 +269,9 @@ def _collapse_keep_latest_with_counts(
     if d.empty:
         return d
 
-    # Aggregations
     grp = d.groupby(key_col, dropna=False)
     counts = grp.size().rename(count_col)
 
-    # Representative row index = idx of latest timestamp per key
     idx = grp[time_col].idxmax()
     rep = d.loc[idx].copy()
 
@@ -299,12 +282,89 @@ def _collapse_keep_latest_with_counts(
             if col in d.columns:
                 rep[out_name] = rep[key_col].map(grp[col].nunique().rename(out_name))
 
-    # Helpful explicit "last_logged" field (same as rep[time_col])
     rep["last_logged"] = rep[time_col]
-
-    # Sort newest first
     rep = rep.sort_values(time_col, ascending=False).reset_index(drop=True)
     return rep
+
+
+def _dedupe_license_users_by_email_prefer_analyst(df_in: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fix inflated counts caused by duplicate Spotfire user accounts that share the same email.
+
+    Rule:
+    - For duplicate USER_EMAIL:
+        * If ANY account in the group has recommendedAction == "Analyst", keep an "Analyst" row and drop others.
+        * Else (all Consumer), keep the row with the most recent LAST_ACTIVITY.
+    - If recommendedAction ties within the chosen tier, break ties by:
+        LAST_ACTIVITY (most recent) -> ANALYST_ACTIONS_PER_DAY (highest) -> USER_NAME (stable)
+
+    Only applies to rows with a non-empty USER_EMAIL.
+    """
+    if df_in is None or df_in.empty:
+        return df_in
+
+    df = df_in.copy()
+
+    if "USER_EMAIL" not in df.columns:
+        return df
+
+    # Normalize email to enable correct grouping
+    df["USER_EMAIL"] = (
+        df["USER_EMAIL"]
+        .where(df["USER_EMAIL"].notna(), None)
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace({"nan": None, "": None})
+    )
+
+    has_email = df["USER_EMAIL"].notna() & (df["USER_EMAIL"].astype(str).str.strip() != "")
+    if not has_email.any():
+        return df
+
+    # Ensure fields exist
+    if "recommendedAction" not in df.columns:
+        df["recommendedAction"] = None
+    if "ANALYST_ACTIONS_PER_DAY" in df.columns:
+        df["ANALYST_ACTIONS_PER_DAY"] = pd.to_numeric(df["ANALYST_ACTIONS_PER_DAY"], errors="coerce").fillna(0)
+    else:
+        df["ANALYST_ACTIONS_PER_DAY"] = 0
+
+    # Parse LAST_ACTIVITY for ordering
+    if "LAST_ACTIVITY" in df.columns:
+        df["_LAST_ACTIVITY_DT"] = pd.to_datetime(df["LAST_ACTIVITY"], errors="coerce", utc=True)
+    else:
+        df["_LAST_ACTIVITY_DT"] = pd.NaT
+
+    ra = df["recommendedAction"].astype(str).str.strip().str.lower()
+    df["_IS_ANALYST"] = (ra == "analyst").astype(int)
+
+    # Sort so "best" row per email is first
+    # - analyst rows first (if any)
+    # - most recent activity
+    # - higher actions/day
+    # - stable tie breaker
+    if "USER_NAME" not in df.columns:
+        df["USER_NAME"] = None
+
+    df_sorted = df.sort_values(
+        by=["_IS_ANALYST", "_LAST_ACTIVITY_DT", "ANALYST_ACTIONS_PER_DAY", "USER_NAME"],
+        ascending=[False, False, False, True],
+        na_position="last",
+    )
+
+    # Keep one row per email (for rows that have an email)
+    kept_email = df_sorted.loc[has_email].drop_duplicates(subset=["USER_EMAIL"], keep="first")
+
+    # Keep all rows with missing/blank email as-is
+    kept_no_email = df_sorted.loc[~has_email].copy()
+
+    out = pd.concat([kept_email, kept_no_email], ignore_index=True)
+
+    # Cleanup helper cols
+    out.drop(columns=["_LAST_ACTIVITY_DT", "_IS_ANALYST"], inplace=True, errors="ignore")
+
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +469,6 @@ def enrich_with_employee_data(
     - dept_name
     - title
 
-
     Perf change: can accept preloaded/cached employee tables to avoid re-pulling Trino.
     """
     df = df_in.copy()
@@ -486,15 +545,8 @@ def enrich_with_employee_data(
 
     # --- Capture employee values BEFORE we overlay "existing" columns ---
     emp_full = merged["full_name"] if "full_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
-    emp_status = (
-        merged["status_name"] if "status_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
-    )
-
-    emp_cc = (
-        merged["cost_center_name"]
-        if "cost_center_name" in merged.columns
-        else pd.Series(index=merged.index, dtype="object")
-    )
+    emp_status = merged["status_name"] if "status_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
+    emp_cc = merged["cost_center_name"] if "cost_center_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
     emp_dept = merged["dept_name"] if "dept_name" in merged.columns else pd.Series(index=merged.index, dtype="object")
     emp_title = merged["title"] if "title" in merged.columns else pd.Series(index=merged.index, dtype="object")
 
@@ -524,15 +576,11 @@ def enrich_with_employee_data(
 
         if "full_name" in to_fix.columns:
             name_map = to_fix.set_index(email_col)["full_name"].to_dict()
-            merged.loc[missing_mask, "FULL_NAME"] = merged.loc[missing_mask, "FULL_NAME"].fillna(
-                key_series.map(name_map)
-            )
+            merged.loc[missing_mask, "FULL_NAME"] = merged.loc[missing_mask, "FULL_NAME"].fillna(key_series.map(name_map))
 
         if "status_name" in to_fix.columns:
             status_map = to_fix.set_index(email_col)["status_name"].to_dict()
-            merged.loc[missing_mask, "STATUS_NAME"] = merged.loc[missing_mask, "STATUS_NAME"].fillna(
-                key_series.map(status_map)
-            )
+            merged.loc[missing_mask, "STATUS_NAME"] = merged.loc[missing_mask, "STATUS_NAME"].fillna(key_series.map(status_map))
 
         for col in ["cost_center_name", "dept_name", "title"]:
             if col in to_fix.columns:
@@ -556,15 +604,11 @@ def enrich_with_employee_data(
 
         if "full_name" in to_fix2.columns:
             name_map2 = to_fix2.set_index(email_col)["full_name"].to_dict()
-            merged.loc[partner_missing, "FULL_NAME"] = merged.loc[partner_missing, "FULL_NAME"].fillna(
-                key_series.map(name_map2)
-            )
+            merged.loc[partner_missing, "FULL_NAME"] = merged.loc[partner_missing, "FULL_NAME"].fillna(key_series.map(name_map2))
 
         if "status_name" in to_fix2.columns:
             status_map2 = to_fix2.set_index(email_col)["status_name"].to_dict()
-            merged.loc[partner_missing, "STATUS_NAME"] = merged.loc[partner_missing, "STATUS_NAME"].fillna(
-                key_series.map(status_map2)
-            )
+            merged.loc[partner_missing, "STATUS_NAME"] = merged.loc[partner_missing, "STATUS_NAME"].fillna(key_series.map(status_map2))
 
         for col in ["cost_center_name", "dept_name", "title"]:
             if col in to_fix2.columns:
@@ -634,6 +678,7 @@ async def get_cached_final_df() -> pd.DataFrame:
     2) Compute recommendedAction
     3) Employee enrichment to get FULL_NAME + STATUS_NAME + org fields
         (now uses cached employee tables)
+    4) Dedupe duplicate accounts by USER_EMAIL to avoid inflated license counts
     """
     df = get_license_df()
     df.columns = [c.strip() for c in df.columns]
@@ -671,6 +716,9 @@ async def get_cached_final_df() -> pd.DataFrame:
         fallback_emp=fallback_emp,
     )
 
+    # NEW: De-dupe duplicate Spotfire accounts by email (prefer Analyst account; else most recent LAST_ACTIVITY)
+    merged = _dedupe_license_users_by_email_prefer_analyst(merged)
+
     return merged
 
 
@@ -678,11 +726,19 @@ async def get_cached_final_df() -> pd.DataFrame:
 async def get_cached_cost_centers_list() -> List[str]:
     """
     Cache the cost center list so the UI dropdown doesn't cause repeated work.
+
+    NOTE: We now only include cost centers that have at least one ACTIVE user,
+    since /license-reduction only returns Active users.
     """
     df = await get_cached_final_df()
 
     if "cost_center_name" not in df.columns:
         raise HTTPException(status_code=400, detail="Missing 'cost_center_name' after employee merge")
+
+    # Only Active users
+    if "STATUS_NAME" in df.columns:
+        status_norm = df["STATUS_NAME"].astype(str).str.strip().str.lower()
+        df = df.loc[status_norm.eq("active")].copy()
 
     centers = sorted({str(x).strip() for x in df["cost_center_name"].dropna().tolist() if str(x).strip()})
     return centers
@@ -704,14 +760,26 @@ async def get_license_reduction(
 ) -> List[Dict[str, Any]]:
     """
     Return a list of records in the exact shape expected by the Next frontend.
+
+    CHANGE:
+    - Only return Active users (STATUS_NAME == "Active")
+    - Under the hood, the dataset is also de-duped by email to prevent inflated counts
     """
     df = await get_cached_final_df()
 
     if "cost_center_name" not in df.columns:
         raise HTTPException(status_code=400, detail="Missing 'cost_center_name' after employee merge")
 
-    mask = df["cost_center_name"].astype(str).str.strip().eq(cost_center_name.strip())
-    filtered = df.loc[mask].copy()
+    mask_cc = df["cost_center_name"].astype(str).str.strip().eq(cost_center_name.strip())
+
+    # Only Active users
+    if "STATUS_NAME" not in df.columns:
+        raise HTTPException(status_code=400, detail="Missing 'STATUS_NAME' after employee merge")
+
+    status_norm = df["STATUS_NAME"].astype(str).str.strip().str.lower()
+    mask_active = status_norm.eq("active")
+
+    filtered = df.loc[mask_cc & mask_active].copy()
 
     def safe(v):
         return None if pd.isna(v) else v
@@ -879,7 +947,6 @@ async def _get_report_views_cached(report_path: str, days: int = 30) -> List[Dic
         extra_count_cols={"session_id": "unique_sessions"} if "session_id" in df_reports.columns else None,
     )
 
-    # Cleanup key column if you don't want to expose it
     df_reports.drop(columns=["_identity_key"], inplace=True, errors="ignore")
 
     # Employee enrichment (cached tables injected)
@@ -891,7 +958,6 @@ async def _get_report_views_cached(report_path: str, days: int = 30) -> List[Dic
         fallback_emp=fallback_emp,
     )
 
-    
     # --- Dedupe by FULL_NAME (keep latest logged_time), but SUM view_count ---
     if "FULL_NAME" in df_reports.columns:
         # Don't collapse unresolved users into one mega-row
@@ -901,38 +967,35 @@ async def _get_report_views_cached(report_path: str, days: int = 30) -> List[Dic
         df_bad = df_reports.loc[~good_name].copy()
 
         if not df_good.empty:
-            # If view_count isn't present for some reason, default it
             if "view_count" not in df_good.columns:
                 df_good["view_count"] = 1
 
-            # Collapse by FULL_NAME: keep latest row, sum view_count (and unique_sessions if present)
             key = "FULL_NAME"
             grp = df_good.groupby(key, dropna=False)
 
-            # representative rows (latest)
             idx = grp["logged_time"].idxmax()
             rep = df_good.loc[idx].copy()
 
-            # sum counts
             rep["view_count"] = rep[key].map(grp["view_count"].sum())
 
             if "unique_sessions" in df_good.columns:
                 # Note: summing nunique-per-identity can overcount if sessions overlap across identities.
-                # If you truly need exact unique sessions per FULL_NAME, we can compute it with a set-based agg.
                 rep["unique_sessions"] = rep[key].map(grp["unique_sessions"].sum())
 
             rep["last_logged"] = rep["logged_time"]
-            df_reports = pd.concat([rep, df_bad], ignore_index=True).sort_values("logged_time", ascending=False).reset_index(drop=True)
+            df_reports = (
+                pd.concat([rep, df_bad], ignore_index=True)
+                .sort_values("logged_time", ascending=False)
+                .reset_index(drop=True)
+            )
         else:
             df_reports = df_bad.sort_values("logged_time", ascending=False).reset_index(drop=True)
-        
-        # Keep your debug behavior
+
         unresolved = df_reports[df_reports["FULL_NAME"] == "Possibly Terminated"]
         if not unresolved.empty:
             print("Users unresolved after employee enrichment:")
             print(unresolved["user_name"].unique())
 
-        # Return JSON-friendly payload without forcing everything to ""
         return df_reports.replace({np.nan: None}).to_dict(orient="records")
 
 
@@ -941,5 +1004,4 @@ async def get_report_views(req: ViewedReportsRequest):
     """
     Returns views for a passed report (cached per report_path).
     """
-    
     return await _get_report_views_cached(req.report_path, req.days)
