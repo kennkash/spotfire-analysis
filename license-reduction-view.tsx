@@ -213,13 +213,36 @@ export default function LicenseReductionView() {
             </Select>
 
             <div className="flex items-center gap-2">
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search name, email, or username…"
-                className="sm:w-[340px]"
-                disabled={!costCenter || isLoading}
-              />
+              <div className="relative sm:w-[340px]">
+  <Input
+    value={search}
+    onChange={(e) => setSearch(e.target.value)}
+    placeholder="Filter any column…"
+    className="pr-8"
+    disabled={!submittedPath || isBusy}
+  />
+
+  {search && (
+    <button
+      type="button"
+      onClick={() => {
+        setSearch("")
+        // optional: refocus input after clearing
+        queueMicrotask(() => {
+          const el = document.activeElement as HTMLElement | null
+          if (el?.tagName !== "INPUT") {
+            const input = el?.closest("form")?.querySelector("input")
+            input?.focus()
+          }
+        })
+      }}
+      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+      aria-label="Clear search"
+    >
+      ✕
+    </button>
+  )}
+</div>
 
               {sortKey && (
                 <Button
