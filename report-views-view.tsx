@@ -1,3 +1,60 @@
+<div className="flex flex-col gap-1 sm:items-end">
+  {/* Top row: Search + Reset */}
+  <div className="flex items-center gap-2">
+    <div className="relative sm:w-[340px]">
+      <Input
+        ref={searchRef}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Filter any column…"
+        className="pr-8"
+        disabled={!submittedPath || isBusy}
+      />
+
+      {!!search.trim() && (
+        <button
+          type="button"
+          onClick={() => {
+            setSearch("")
+            requestAnimationFrame(() => searchRef.current?.focus())
+          }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          aria-label="Clear search"
+          title="Clear"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+
+    <div className="w-[72px]">
+      {sortKey ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setSortKey(null)
+            setSortDir("asc")
+          }}
+          disabled={!submittedPath || isBusy}
+          className="w-full"
+        >
+          Reset
+        </Button>
+      ) : null}
+    </div>
+  </div>
+
+  {/* Second row: align under the whole top row (search + reset slot) */}
+  {!!search.trim() && (
+    <div className="text-xs text-muted-foreground w-[calc(340px+8px+72px)]">
+      Showing {finalRows.length} of {rows.length}
+    </div>
+  )}
+</div>
+
+
+
 // spotfire-license-hub/src/components/report-views/report-views-view.tsx
 
 "use client"
