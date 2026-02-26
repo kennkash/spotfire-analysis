@@ -93,7 +93,7 @@ export default function ReportViewsView() {
   const [reportPath, setReportPath] = React.useState("")
   const [timeRange, setTimeRange] = React.useState("30")
 
-  // Submitted inputs (only change when user clicks Fetch / presses Enter)
+  // Submitted inputs (only change when user clicks Fetch / submits form)
   const [submittedPath, setSubmittedPath] = React.useState<string>("")
   const [submittedTimeRange, setSubmittedTimeRange] = React.useState<string>("30")
 
@@ -101,10 +101,12 @@ export default function ReportViewsView() {
   const [sortKey, setSortKey] = React.useState<string | null>(null)
   const [sortDir, setSortDir] = React.useState<SortDir>("asc")
 
+  const reportPathRef = React.useRef<HTMLInputElement | null>(null)
+
   const { data: rows = [], isLoading, isFetching, error } = useQuery({
     queryKey: ["report-views", submittedPath, submittedTimeRange],
     queryFn: () => fetchReportViews(submittedPath, submittedTimeRange),
-    enabled: !!submittedPath, // 👈 only fetch after a path has been submitted
+    enabled: !!submittedPath,
     refetchOnWindowFocus: false,
     staleTime: 0,
     retry: 1,
@@ -121,7 +123,7 @@ export default function ReportViewsView() {
     { key: "logged_time", label: "Last Viewed" },
   ]
 
-  // Reset search/sorting when a new report OR timeframe is submitted (i.e., when data actually changes)
+  // Reset search/sorting when the fetched dataset changes
   React.useEffect(() => {
     setSearch("")
     setSortKey(null)
@@ -182,8 +184,6 @@ export default function ReportViewsView() {
 
   const reportNotFound = submittedPath && !isLoading && !isFetching && rows.length === 0
 
-  // ✅ Button is always "Fetch"
-  // ✅ Disabled until reportPath OR timeRange differs from last submitted values
   const hasSubmitted = !!submittedPath
   const isBusy = isLoading || isFetching
 
@@ -191,7 +191,9 @@ export default function ReportViewsView() {
   const canFetch =
     !!trimmedPath &&
     !isBusy &&
-    (!hasSubmitted || trimmedPath !== submittedPath || timeRange !== submittedTimeRange)
+    (!hasSubmitted ||
+      trimmedPath !== submittedPath ||
+      timeRange !== submittedTimeRange)
 
   const onFetch = () => {
     const v = reportPath.trim()
@@ -199,7 +201,7 @@ export default function ReportViewsView() {
 
     setSubmittedPath(v)
     setSubmittedTimeRange(timeRange)
-    setReportPath(v) // keeps input normalized
+    setReportPath(v) // normalize the input
   }
 
   return (
@@ -275,19 +277,30 @@ export default function ReportViewsView() {
 
           {/* Controls */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mt-3">
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                onFetch()
+              }}
+              className="flex items-center gap-2 w-full sm:w-auto"
+            >
               <Input
+                ref={reportPathRef}
                 value={reportPath}
                 onChange={(e) => setReportPath(e.target.value)}
                 placeholder="Enter report path (e.g. /31_S.LSI/04 Team/Spotfire/Jane Doe/Spotfire_Analysis)"
                 className="sm:w-[540px]"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") onFetch()
-                }}
                 disabled={isBusy}
               />
 
-              <Select value={timeRange} onValueChange={setTimeRange}>
+              <Select
+                value={timeRange}
+                onValueChange={(v) => {
+                  setTimeRange(v)
+                  // Auto-focus back to the input after selecting a time range so Enter works naturally
+                  queueMicrotask(() => reportPathRef.current?.focus())
+                }}
+              >
                 <SelectTrigger className="w-[140px]">
                   <SelectValue placeholder="Time range" />
                 </SelectTrigger>
@@ -298,10 +311,10 @@ export default function ReportViewsView() {
                 </SelectContent>
               </Select>
 
-              <Button onClick={onFetch} disabled={!canFetch} className="hover:cursor-pointer">
+              <Button type="submit" disabled={!canFetch} className="hover:cursor-pointer">
                 Fetch
               </Button>
-            </div>
+            </form>
 
             <div className="flex items-center gap-2">
               <Input
@@ -387,7 +400,8 @@ export default function ReportViewsView() {
             <LoadingIndicator />
           ) : !submittedPath ? (
             <div className="text-center py-10 text-muted-foreground">
-              Enter a report path above and click <span className="font-medium">Fetch</span>.
+              Enter a report path above and press <span className="font-medium">Enter</span> or click{" "}
+              <span className="font-medium">Fetch</span>.
             </div>
           ) : reportNotFound ? (
             <div className="py-16 text-center">
@@ -402,6 +416,7 @@ export default function ReportViewsView() {
                   setSubmittedPath("")
                   setSubmittedTimeRange("30")
                   setTimeRange("30")
+                  queueMicrotask(() => reportPathRef.current?.focus())
                 }}
                 className="mt-4"
               >
