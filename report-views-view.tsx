@@ -317,57 +317,57 @@ export default function ReportViewsView() {
                             </Button>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                            <div className="relative sm:w-[340px]">
-                                <Input
-                                    ref={searchRef}
-                                    value={search}
-                                    onChange={(e) => setSearch(e.target.value)}
-                                    placeholder="Filter any column…"
-                                    className="pr-8"
-                                    disabled={!submittedPath || isBusy}
-                                />
+                        <div className="flex flex-col gap-1 sm:items-end">
+  {/* Top row: Search + Reset */}
+  <div className="flex items-center gap-2">
+    <div className="relative sm:w-[340px]">
+      <Input
+        ref={searchRef}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Filter any column…"
+        className="pr-8"
+        disabled={!submittedPath || isBusy}
+      />
 
-                                {!!search.trim() && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setSearch("")
-                                            // Focus AFTER React applies the state update
-                                            requestAnimationFrame(() => searchRef.current?.focus())
-                                        }}
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                        aria-label="Clear search"
-                                        title="Clear"
-                                    >
-                                        ✕
-                                    </button>
-                                )}
-                            </div>
+      {!!search.trim() && (
+        <button
+          type="button"
+          onClick={() => {
+            setSearch("")
+            requestAnimationFrame(() => searchRef.current?.focus())
+          }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          aria-label="Clear search"
+          title="Clear"
+        >
+          ✕
+        </button>
+      )}
+    </div>
 
-                            {!!search.trim() && (
-                                <span className="mt-2 text-sm text-muted-foreground flex items-center gap-2">
-                                    Showing {finalRows.length} of {rows.length}
-                                </span>
-                            )}
+    {sortKey && (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          setSortKey(null)
+          setSortDir("asc")
+        }}
+        disabled={!submittedPath || isBusy}
+      >
+        Reset
+      </Button>
+    )}
+  </div>
 
-                            {sortKey && (
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                        setSortKey(null)
-                                        setSortDir("asc")
-                                    }}
-                                    disabled={!submittedPath || isBusy}
-                                >
-                                    Reset
-                                </Button>
-                            )}
-
-
-                        </div>
-                    </div>
+  {/* Second row: Showing... under search */}
+  {!!search.trim() && (
+    <div className="text-xs text-muted-foreground sm:w-[340px]">
+      Showing {finalRows.length} of {rows.length}
+    </div>
+  )}
+</div>
 
                     {!!submittedPath && (
                         <div className="mt-2 text-sm text-muted-foreground flex items-center gap-2">
