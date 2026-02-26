@@ -98,51 +98,6 @@ function formatDateTime(value: any) {
     return `${month}/${day}/${year} ${pad(displayHours)}:${minutes}:${seconds} ${ampm}`;
 }
 
-function toEpochMs(value: any): number | null {
-  if (value === null || value === undefined || value === "") return null
-
-  // If backend ever sends numeric epoch (seconds or ms)
-  if (typeof value === "number" && Number.isFinite(value)) {
-    // heuristic: seconds vs ms
-    return value < 1e12 ? value * 1000 : value
-  }
-
-  const s = String(value).trim()
-  if (!s) return null
-
-  // ISO-8601 (best case): 2026-02-25T18:12:33Z or with offset
-  if (s.includes("T")) {
-    const t = new Date(s).getTime()
-    return Number.isNaN(t) ? null : t
-  }
-
-  // "MM/DD/YYYY hh:mm:ss AM/PM" (what your formatter outputs)
-  const m = s.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)$/i
-  )
-  if (m) {
-    const mm = Number(m[1])
-    const dd = Number(m[2])
-    const yyyy = Number(m[3])
-    let hh = Number(m[4])
-    const min = Number(m[5])
-    const sec = Number(m[6])
-    const ampm = m[7].toUpperCase()
-
-    if (ampm === "PM" && hh !== 12) hh += 12
-    if (ampm === "AM" && hh === 12) hh = 0
-
-    // Your display uses UTC pieces, so sort as UTC to match what users see
-    return Date.UTC(yyyy, mm - 1, dd, hh, min, sec)
-  }
-
-  // Last attempt (may work for some browser-locale formats)
-  const t = new Date(s).getTime()
-  return Number.isNaN(t) ? null : t
-}
-
-
-
 export default function ReportViewsView() {
     // Draft inputs (user can change these freely)
     const [reportPath, setReportPath] = React.useState("")
@@ -203,26 +158,13 @@ export default function ReportViewsView() {
 
         const compare = (a: JsonRow, b: JsonRow) => {
             if (sortKey === "view_count") {
+                // Handle view_count as a number
                 const countA = Number(a?.[sortKey] || 0)
                 const countB = Number(b?.[sortKey] || 0)
                 return (countA - countB) * dir
             }
 
-            if (sortKey === "logged_time") {
-              const tA = toEpochMs(a?.[sortKey])
-              const tB = toEpochMs(b?.[sortKey])
-            
-              const aValid = typeof tA === "number"
-              const bValid = typeof tB === "number"
-            
-              // Always push invalid/missing to the bottom (both asc + desc)
-              if (!aValid && !bValid) return 0
-              if (!aValid) return 1
-              if (!bValid) return -1
-            
-              return (tA - tB) * dir
-            }
-
+            // Handle other columns as strings
             const av = normalize(a?.[sortKey])
             const bv = normalize(b?.[sortKey])
             return av.localeCompare(bv, undefined, { sensitivity: "base" }) * dir
@@ -370,7 +312,6 @@ export default function ReportViewsView() {
                                     <SelectItem value="90">Last 90 Days</SelectItem>
                                 </SelectContent>
                             </Select>
-
                             <Button onClick={onFetch} disabled={!canFetch} className="hover:cursor-pointer">
                                 Fetch
                             </Button>
@@ -423,6 +364,8 @@ export default function ReportViewsView() {
                                     Reset
                                 </Button>
                             )}
+
+
                         </div>
                     </div>
 
@@ -436,7 +379,9 @@ export default function ReportViewsView() {
                     )}
 
                     {error ? (
-                        <div className="mt-3 text-sm text-red-600">{(error as Error).message || "Failed to load report views"}</div>
+                        <div className="mt-3 text-sm text-red-600">
+                            {(error as Error).message || "Failed to load report views"}
+                            </div>
                     ) : null}
 
                     {!!submittedPath && rows.length > 0 && (
@@ -502,9 +447,15 @@ export default function ReportViewsView() {
                                 <TableRow>
                                     {columnConfig.map((col) => (
                                         <TableHead key={col.key}>
-                                            <Button variant="ghost" className="px-0 h-auto font-medium" onClick={() => onSort(col.key)}>
+                                            <Button 
+                                            variant="ghost" 
+                                            className="px-0 h-auto font-medium" 
+                                            onClick={() => onSort(col.key)}
+                                            >
                                                 {col.label}
-                                                <span className="ml-2 text-muted-foreground">{sortIcon(sortKey === col.key, sortDir)}</span>
+                                                <span className="ml-2 text-muted-foreground">
+                                                    {sortIcon(sortKey === col.key, sortDir)}
+                                                    </span>
                                             </Button>
                                         </TableHead>
                                     ))}
@@ -523,7 +474,9 @@ export default function ReportViewsView() {
                                         <TableRow key={idx}>
                                             {columnConfig.map((col) => (
                                                 <TableCell key={col.key}>
-                                                    {col.key === "logged_time" ? formatDateTime(r?.[col.key]) : normalize(r?.[col.key])}
+                                                    {col.key === "logged_time"
+                                                        ? formatDateTime(r?.[col.key])
+                                                        : normalize(r?.[col.key])}
                                                 </TableCell>
                                             ))}
                                         </TableRow>
